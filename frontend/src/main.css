@@ -1,0 +1,122 @@
+:root{
+  :root{
+    --bg: #f7fafc;
+    --surface: #ffffff;
+    --muted: #6b7280;
+    --accent: #0ea5ff;
+    --accent-2: #2563eb;
+    --glass: rgba(37,99,235,0.06);
+    --radius: 12px;
+    --shadow: 0 8px 24px rgba(16,24,40,0.08);
+  }
+
+  *{box-sizing:border-box}
+  html,body,#root{height:100%}
+  body{
+    margin:0;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    background: linear-gradient(180deg,#f8fafc 0%, #eef2ff 100%);
+    color:#0b1220;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+  }
+
+  .app-root{display:flex;flex-direction:column;min-height:100%}
+
+  .site-header{display:flex;justify-content:space-between;align-items:center;padding:18px 40px;background:transparent}
+  .brand h1{margin:0;font-size:1.25rem;letter-spacing:0.2px}
+  .brand .tag{margin:4px 0 0;color:var(--muted);font-size:0.9rem}
+
+  .top-nav{display:flex;gap:10px;align-items:center}
+  .nav-link{background:transparent;border:0;color:var(--muted);padding:8px 12px;border-radius:8px;cursor:pointer}
+  .nav-link:hover{color:#0b1220;background:var(--glass)}
+  .nav-primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));border:0;color:#fff;padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:600}
+
+  .site-main{flex:1;padding:36px 40px}
+
+  .hero{display:flex;gap:28px;align-items:center}
+  .hero-inner{flex:1;max-width:720px}
+  .hero h2{font-size:2.25rem;margin:0 0 12px}
+  .lead{color:var(--muted);font-size:1.05rem;margin-bottom:18px}
+  .hero-cta button{margin-right:12px;padding:12px 18px;border-radius:10px;border:0;cursor:pointer}
+  .hero-cta .ghost{background:transparent;border:1px solid rgba(11,17,32,0.06);color:var(--muted)}
+  .hero-cta button:first-child{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff;font-weight:600}
+
+  .hero-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:20px}
+  .card{background:var(--surface);padding:18px;border-radius:12px;box-shadow:var(--shadow);border:1px solid rgba(11,17,32,0.04)}
+  .card.feature h3{margin:0 0 8px}
+  .card.feature p{margin:0;color:var(--muted);font-size:0.95rem}
+
+  .hero-media{width:360px;display:flex;flex-direction:column;gap:12px}
+  .sky{height:140px;background:linear-gradient(180deg,#dbeafe00,#fff0);position:relative;overflow:hidden;border-radius:12px}
+  .cloud{position:absolute;background:linear-gradient(90deg,#fff,#f1f5f9);height:28px;width:90px;border-radius:999px;opacity:0.9}
+  .c1{top:18px;left:-120px;animation:cloud-move 18s linear infinite}
+  .c2{top:40px;left:-200px;width:110px;animation:cloud-move 26s linear infinite;opacity:0.8}
+  .c3{top:6px;left:-60px;width:70px;animation:cloud-move 14s linear infinite;opacity:0.95}
+
+  .road{height:120px;background:linear-gradient(180deg,#eef2ff,#fff);border-radius:12px;display:flex;align-items:end;padding:10px;box-shadow:var(--shadow)}
+  .bus-wrap{width:100%;overflow:hidden}
+  .bus{height:72px;display:block;transform:translateX(-220px);animation:drive 8s linear infinite}
+
+  @keyframes drive{0%{transform:translateX(-220px)}50%{transform:translateX(20px)}100%{transform:translateX(420px)}}
+  @keyframes cloud-move{0%{transform:translateX(-30%)}100%{transform:translateX(160%)}}
+
+  /* wheel rotation */
+  .wheel{transform-origin:center;animation:wheel-rot 0.8s linear infinite}
+  .wheel-hub{transform-origin:center}
+  @keyframes wheel-rot{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+
+  /* Entrance animations */
+  @keyframes fadeUp{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
+  @keyframes popIn{0%{opacity:0;transform:scale(0.96)}60%{opacity:1;transform:scale(1.02)}100%{transform:scale(1)}}
+  @keyframes slideUp{0%{opacity:0;transform:translateY(20px)}100%{opacity:1;transform:translateY(0)}}
+  @keyframes slideLeft{0%{opacity:0;transform:translateX(40px)}100%{opacity:1;transform:translateX(0)}}
+  @keyframes fadeIn{0%{opacity:0}100%{opacity:1}}
+  
+  .animate-fade-up{opacity:0;animation-name:fadeUp;animation-duration:520ms;animation-timing-function:cubic-bezier(.2,.9,.2,1);animation-fill-mode:forwards}
+  .animate-pop{opacity:0;animation-name:popIn;animation-duration:420ms;animation-timing-function:cubic-bezier(.2,.9,.2,1);animation-fill-mode:forwards}
+
+  /* allow inline style delay from React, but provide utility delays if needed */
+  .stagger-1{animation-delay:80ms}
+  .stagger-2{animation-delay:160ms}
+  .stagger-3{animation-delay:240ms}
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    .bus{animation:none}
+    .cloud{animation:none}
+    .animate-fade-up{animation:none;opacity:1;transform:none}
+    .animate-pop{animation:none;opacity:1;transform:none}
+  }
+
+  .site-footer{padding:18px 40px;background:transparent;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+
+  /* small screens */
+  @media (max-width:900px){
+    .hero{flex-direction:column}
+    .hero-media{width:100%}
+    .hero-cards{grid-template-columns:1fr;}
+    .site-header,.site-main,.site-footer{padding-left:20px;padding-right:20px}
+  }
+
+  /* simple form tweaks used by login pages */
+  .form {background:var(--surface);padding:20px;border-radius:12px;border:1px solid rgba(11,17,32,0.04)}
+  .form label{display:block;margin-bottom:6px;color:var(--muted);font-size:0.9rem}
+  .form input{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(11,17,32,0.06);background:transparent;color:inherit;margin-bottom:12px}
+  .form button{padding:10px 14px;border-radius:8px;border:0;background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff;font-weight:600}
+
+  .muted{color:var(--muted);font-size:0.9rem}
+
+  /* Modal styles */
+  .modal-overlay{position:fixed;inset:0;background:rgba(2,6,23,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:60}
+  .modal{background:var(--surface);border-radius:12px;width:520px;max-width:100%;box-shadow:var(--shadow);position:relative;border:1px solid rgba(11,17,32,0.06);overflow:hidden}
+  .modal-body{padding:20px}
+  .modal-close{position:absolute;right:8px;top:8px;border:0;background:transparent;font-size:20px;line-height:1;padding:8px;cursor:pointer}
+
+  /* card entrance animation (from left) */
+  @keyframes fadeLeft{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:none}}
+  .animate-fade-left{opacity:0;animation-name:fadeLeft;animation-duration:520ms;animation-timing-function:cubic-bezier(.2,.9,.2,1);animation-fill-mode:forwards}
+
+  /* focus styles for accessibility */
+  button:focus, input:focus, .card:focus{outline:3px solid rgba(37,99,235,0.18);outline-offset:3px}
+

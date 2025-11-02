@@ -1,0 +1,29 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: smartbusdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+    restart: on-failure
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/smartbusdb
+      - JWT_SECRET=devsecret
+    ports:
+      - "4000:4000"
+    depends_on:
+      - postgres
+
+volumes:
+  db-data:
+    driver: local

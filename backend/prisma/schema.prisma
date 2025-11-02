@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Switched to SQLite for local dev when Docker/Postgres isn't available.
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String?
+  email     String   @unique
+  password  String
+  role      String
+  collegeId Int?
+  createdAt DateTime @default(now())
+}
+
+model College {
+  id        Int      @id @default(autoincrement())
+  name      String
+  address   String?
+  createdAt DateTime @default(now())
+}
+
+model StudentRegistration {
+  id         Int      @id @default(autoincrement())
+  studentName String
+  studentId   String
+  course      String?
+  collegeId   Int
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+}
+
+model PassengerRegistration {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  passengerName String
+  email      String
+  passType   String   @default("monthly")
+  passName   String?
+  status     String   @default("pending")
+  documents  String?  // JSON string of document paths
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model BusPass {
+  id           Int      @id @default(autoincrement())
+  studentRegistrationId Int
+  passNumber   String   @unique
+  issueDate    DateTime @default(now())
+  expiryDate   DateTime?
+  rfidUid      String?  @unique
+  status       String   @default("active")
+}
+
+model RFIDWriteLog {
+  id         Int      @id @default(autoincrement())
+  busPassId  Int
+  rfidUid    String?
+  success    Boolean
+  rawResponse String?
+  createdAt  DateTime @default(now())
+}
