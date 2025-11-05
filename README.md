@@ -28,27 +28,21 @@ A modern web application for managing student bus passes, including registration
 
 ### Running Locally
 
-1. **Install dependencies**:
-
-```bash
-cd D:\Project\Harish
-cd frontend && npm install && cd ..
-cd backend && npm install && cd ..
-```
-
-2. **Start backend**:
+1. **Start backend** (Terminal 1):
 
 ```bash
 cd backend
+npm install
 npm run dev
 ```
 
 Backend runs on `http://localhost:4000`.
 
-3. **Start frontend** (in a new terminal):
+2. **Start frontend** (Terminal 2):
 
 ```bash
 cd frontend
+npm install
 npm run dev
 ```
 

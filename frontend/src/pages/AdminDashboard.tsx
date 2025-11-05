@@ -5,8 +5,15 @@ interface Reg {
   studentName?: string;
   passengerName?: string;
   studentId?: string;
+  email?: string;
   passType?: string;
+  age?: number;
+  phoneNumber?: string;
+  address?: string;
+  idType?: string;
+  idNumber?: string;
   status: string;
+  declineReason?: string;
   type?: string;
 }
 
@@ -21,6 +28,9 @@ export default function AdminDashboard({ onLogout }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<number | null>(null);
+  const [selectedPassenger, setSelectedPassenger] = useState<Reg | null>(null);
+  const [declineReason, setDeclineReason] = useState("");
+  const [isDeclineOpen, setIsDeclineOpen] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("sbp_token");
@@ -78,6 +88,44 @@ export default function AdminDashboard({ onLogout }: Props) {
       })
       .catch((e) => alert(String(e)))
       .finally(() => setApproving(null));
+  };
+
+  const decline = async () => {
+    if (!selectedPassenger || !declineReason.trim()) {
+      alert("Please enter a decline reason");
+      return;
+    }
+
+    setApproving(selectedPassenger.id);
+    const token = localStorage.getItem("sbp_token");
+
+    try {
+      const response = await fetch(
+        `http://localhost:4000/api/admin/passenger-registrations/${selectedPassenger.id}/decline`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ reason: declineReason })
+        }
+      );
+
+      const json = await response.json();
+      if (json.registration) {
+        setPassengerItems((s) => s.filter((it) => it.id !== selectedPassenger.id));
+        setIsDeclineOpen(false);
+        setSelectedPassenger(null);
+        setDeclineReason("");
+      } else {
+        alert("Error: " + JSON.stringify(json));
+      }
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setApproving(null);
+    }
   };
 
   const items = tab === "college" ? collegeItems : passengerItems;
@@ -261,33 +309,60 @@ export default function AdminDashboard({ onLogout }: Props) {
                         </td>
                       )}
                       <td style={{ padding: "14px", textAlign: "center" }}>
-                        <button
-                          onClick={() => approve(it.id)}
-                          disabled={approving === it.id}
-                          style={{
-                            padding: "8px 16px",
-                            background: approving === it.id ? "#d1d5db" : "linear-gradient(90deg, #10b981, #059669)",
-                            color: "#fff",
-                            border: "none",
-                            borderRadius: "6px",
-                            cursor: approving === it.id ? "not-allowed" : "pointer",
-                            fontSize: "0.9rem",
-                            fontWeight: "600",
-                            transition: "all 0.3s ease"
-                          }}
-                          onMouseOver={(e) => {
-                            if (approving !== it.id) {
+                        {tab === "college" ? (
+                          <button
+                            onClick={() => approve(it.id)}
+                            disabled={approving === it.id}
+                            style={{
+                              padding: "8px 16px",
+                              background: approving === it.id ? "#d1d5db" : "linear-gradient(90deg, #10b981, #059669)",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: approving === it.id ? "not-allowed" : "pointer",
+                              fontSize: "0.9rem",
+                              fontWeight: "600",
+                              transition: "all 0.3s ease"
+                            }}
+                            onMouseOver={(e) => {
+                              if (approving !== it.id) {
+                                e.currentTarget.style.transform = "translateY(-2px)";
+                                e.currentTarget.style.boxShadow = "0 4px 12px rgba(16,185,129,0.3)";
+                              }
+                            }}
+                            onMouseOut={(e) => {
+                              e.currentTarget.style.transform = "none";
+                              e.currentTarget.style.boxShadow = "none";
+                            }}
+                          >
+                            {approving === it.id ? "⏳ Approving..." : "✅ Approve"}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setSelectedPassenger(it)}
+                            style={{
+                              padding: "8px 16px",
+                              background: "#3b82f6",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              fontSize: "0.9rem",
+                              fontWeight: "600",
+                              transition: "all 0.3s ease"
+                            }}
+                            onMouseOver={(e) => {
                               e.currentTarget.style.transform = "translateY(-2px)";
-                              e.currentTarget.style.boxShadow = "0 4px 12px rgba(16,185,129,0.3)";
-                            }
-                          }}
-                          onMouseOut={(e) => {
-                            e.currentTarget.style.transform = "none";
-                            e.currentTarget.style.boxShadow = "none";
-                          }}
-                        >
-                          {approving === it.id ? "⏳ Approving..." : "✅ Approve"}
-                        </button>
+                              e.currentTarget.style.boxShadow = "0 4px 12px rgba(59,130,246,0.3)";
+                            }}
+                            onMouseOut={(e) => {
+                              e.currentTarget.style.transform = "none";
+                              e.currentTarget.style.boxShadow = "none";
+                            }}
+                          >
+                            👁️ View Details
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -297,6 +372,303 @@ export default function AdminDashboard({ onLogout }: Props) {
           </div>
         )}
       </div>
+
+      {/* Passenger Details Modal */}
+      {selectedPassenger && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: "#fff",
+            borderRadius: "12px",
+            maxWidth: "600px",
+            width: "90%",
+            maxHeight: "90vh",
+            overflow: "auto",
+            boxShadow: "0 20px 25px rgba(0,0,0,0.2)"
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "24px",
+              borderBottom: "1px solid #e5e7eb",
+              background: "#f9fafb"
+            }}>
+              <h2 style={{ margin: 0, fontSize: "1.5rem", color: "#0b1220" }}>🎫 Passenger Details</h2>
+              <button
+                onClick={() => {
+                  setSelectedPassenger(null);
+                  setIsDeclineOpen(false);
+                  setDeclineReason("");
+                }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: "1.5rem",
+                  cursor: "pointer",
+                  color: "#6b7280"
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div style={{ padding: "24px" }}>
+              {!isDeclineOpen ? (
+                <>
+                  {/* Personal Information */}
+                  <div style={{ marginBottom: "24px" }}>
+                    <h3 style={{ margin: "0 0 16px 0", fontSize: "1.1rem", color: "#0b1220", fontWeight: "600" }}>
+                      📋 Personal Information
+                    </h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                          Full Name
+                        </label>
+                        <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
+                          {selectedPassenger.passengerName}
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                          Age
+                        </label>
+                        <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
+                          {selectedPassenger.age} years
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                          Phone Number
+                        </label>
+                        <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
+                          {selectedPassenger.phoneNumber}
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                          Email
+                        </label>
+                        <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
+                          {selectedPassenger.email}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Address */}
+                  <div style={{ marginBottom: "24px" }}>
+                    <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                      Address
+                    </label>
+                    <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500", whiteSpace: "pre-wrap" }}>
+                      {selectedPassenger.address}
+                    </div>
+                  </div>
+
+                  {/* Government ID */}
+                  <div style={{ marginBottom: "24px", padding: "16px", background: "#f0fdf4", borderRadius: "8px", borderLeft: "4px solid #10b981" }}>
+                    <h3 style={{ margin: "0 0 12px 0", fontSize: "0.95rem", color: "#0b1220", fontWeight: "600" }}>
+                      🆔 Government ID
+                    </h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                          ID Type
+                        </label>
+                        <div style={{ fontSize: "0.9rem", color: "#0b1220", fontWeight: "500" }}>
+                          {selectedPassenger.idType?.toUpperCase() || "N/A"}
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                          ID Number
+                        </label>
+                        <div style={{ fontSize: "0.9rem", color: "#0b1220", fontWeight: "500", fontFamily: "monospace" }}>
+                          {selectedPassenger.idNumber}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pass Type */}
+                  <div style={{ marginBottom: "24px", padding: "16px", background: "#eff6ff", borderRadius: "8px", borderLeft: "4px solid #3b82f6" }}>
+                    <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                      🎫 Requested Pass Type
+                    </label>
+                    <div style={{ fontSize: "1rem", color: "#0b1220", fontWeight: "600" }}>
+                      {selectedPassenger.passType?.toUpperCase() || "MONTHLY"}
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div style={{ display: "flex", gap: "12px", marginTop: "32px" }}>
+                    <button
+                      onClick={() => {
+                        approve(selectedPassenger.id);
+                        setSelectedPassenger(null);
+                      }}
+                      disabled={approving === selectedPassenger.id}
+                      style={{
+                        flex: 1,
+                        padding: "12px",
+                        background: approving === selectedPassenger.id ? "#d1d5db" : "linear-gradient(90deg, #10b981, #059669)",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "8px",
+                        cursor: approving === selectedPassenger.id ? "not-allowed" : "pointer",
+                        fontWeight: "600",
+                        fontSize: "0.95rem",
+                        transition: "all 0.3s ease"
+                      }}
+                      onMouseOver={(e) => {
+                        if (approving !== selectedPassenger.id) {
+                          e.currentTarget.style.transform = "translateY(-2px)";
+                          e.currentTarget.style.boxShadow = "0 4px 12px rgba(16,185,129,0.3)";
+                        }
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.transform = "none";
+                        e.currentTarget.style.boxShadow = "none";
+                      }}
+                    >
+                      {approving === selectedPassenger.id ? "⏳ Approving..." : "✅ Approve"}
+                    </button>
+                    <button
+                      onClick={() => setIsDeclineOpen(true)}
+                      style={{
+                        flex: 1,
+                        padding: "12px",
+                        background: "#ef4444",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        fontWeight: "600",
+                        fontSize: "0.95rem",
+                        transition: "all 0.3s ease"
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.background = "#dc2626";
+                        e.currentTarget.style.transform = "translateY(-2px)";
+                        e.currentTarget.style.boxShadow = "0 4px 12px rgba(239,68,68,0.3)";
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.background = "#ef4444";
+                        e.currentTarget.style.transform = "none";
+                        e.currentTarget.style.boxShadow = "none";
+                      }}
+                    >
+                      ❌ Decline
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Decline Form */}
+                  <div>
+                    <h3 style={{ margin: "0 0 16px 0", fontSize: "1.1rem", color: "#0b1220", fontWeight: "600" }}>
+                      📝 Reason for Decline
+                    </h3>
+                    <p style={{ color: "#6b7280", margin: "0 0 12px 0", fontSize: "0.9rem" }}>
+                      Please provide a clear reason so the passenger can resubmit with corrections
+                    </p>
+                    <textarea
+                      value={declineReason}
+                      onChange={(e) => setDeclineReason(e.target.value)}
+                      placeholder="e.g., ID number doesn't match documents, Address incomplete, etc."
+                      rows={5}
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: "8px",
+                        fontSize: "0.95rem",
+                        fontFamily: "inherit",
+                        boxSizing: "border-box",
+                        resize: "vertical"
+                      }}
+                    />
+                    
+                    {/* Decline Buttons */}
+                    <div style={{ display: "flex", gap: "12px", marginTop: "20px" }}>
+                      <button
+                        onClick={() => {
+                          setIsDeclineOpen(false);
+                          setDeclineReason("");
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: "12px",
+                          background: "transparent",
+                          border: "2px solid #e5e7eb",
+                          color: "#0b1220",
+                          borderRadius: "8px",
+                          cursor: "pointer",
+                          fontWeight: "600",
+                          fontSize: "0.95rem",
+                          transition: "all 0.3s ease"
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.background = "#f9fafb";
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={decline}
+                        disabled={approving === selectedPassenger.id || !declineReason.trim()}
+                        style={{
+                          flex: 1,
+                          padding: "12px",
+                          background: approving === selectedPassenger.id || !declineReason.trim() ? "#d1d5db" : "#ef4444",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "8px",
+                          cursor: approving === selectedPassenger.id || !declineReason.trim() ? "not-allowed" : "pointer",
+                          fontWeight: "600",
+                          fontSize: "0.95rem",
+                          transition: "all 0.3s ease"
+                        }}
+                        onMouseOver={(e) => {
+                          if (approving !== selectedPassenger.id && declineReason.trim()) {
+                            e.currentTarget.style.background = "#dc2626";
+                            e.currentTarget.style.transform = "translateY(-2px)";
+                            e.currentTarget.style.boxShadow = "0 4px 12px rgba(239,68,68,0.3)";
+                          }
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.background = approving === selectedPassenger.id || !declineReason.trim() ? "#d1d5db" : "#ef4444";
+                          e.currentTarget.style.transform = "none";
+                          e.currentTarget.style.boxShadow = "none";
+                        }}
+                      >
+                        {approving === selectedPassenger.id ? "⏳ Declining..." : "✅ Confirm Decline"}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

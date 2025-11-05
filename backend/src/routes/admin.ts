@@ -77,13 +77,35 @@ router.post('/passenger-registrations/:id/approve', async (req, res) => {
   try {
     const reg = await prisma.passengerRegistration.update({
       where: { id: Number(id) },
-      data: { status: 'approved' },
+      data: { status: 'approved', declineReason: null }
     });
 
     res.json({ registration: reg, message: 'Passenger pass request approved' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to approve passenger registration' });
+  }
+});
+
+// POST /api/admin/passenger-registrations/:id/decline - Decline passenger registration with reason
+router.post('/passenger-registrations/:id/decline', async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+
+  if (!reason) {
+    return res.status(400).json({ error: 'Decline reason is required' });
+  }
+
+  try {
+    const reg = await prisma.passengerRegistration.update({
+      where: { id: Number(id) },
+      data: { status: 'declined', declineReason: reason }
+    });
+
+    res.json({ registration: reg, message: 'Passenger pass request declined' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to decline passenger registration' });
   }
 });
 
