@@ -22,15 +22,21 @@ type Props = {
 };
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [tab, setTab] = useState<"college" | "passenger">("college");
+  const [tab, setTab] = useState<"college" | "passenger" | "approved">("college");
   const [collegeItems, setCollegeItems] = useState<Reg[]>([]);
   const [passengerItems, setPassengerItems] = useState<Reg[]>([]);
+  const [approvedStudents, setApprovedStudents] = useState<Reg[]>([]);
+  const [approvedPassengers, setApprovedPassengers] = useState<Reg[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
   const [selectedPassenger, setSelectedPassenger] = useState<Reg | null>(null);
   const [declineReason, setDeclineReason] = useState("");
   const [isDeclineOpen, setIsDeclineOpen] = useState(false);
+  const [approveSuccess, setApproveSuccess] = useState<{ uniquePassId: string; rfidUid: string } | null>(null);
+  const [approveProgress, setApproveProgress] = useState<number>(0); // 0-100
+  const [approveStage, setApproveStage] = useState<string>(""); // Current stage description
 
   useEffect(() => {
     const token = localStorage.getItem("sbp_token");
@@ -41,18 +47,23 @@ export default function AdminDashboard({ onLogout }: Props) {
 
     setLoading(true);
 
-    // Fetch both college and passenger registrations
+    // Fetch pending and approved registrations
     Promise.all([
       fetch("http://localhost:4000/api/admin/registrations?status=pending&type=student", {
         headers: { Authorization: `Bearer ${token}` },
       }).then(r => r.json()),
       fetch("http://localhost:4000/api/admin/registrations?status=pending&type=passenger", {
         headers: { Authorization: `Bearer ${token}` },
+      }).then(r => r.json()),
+      fetch("http://localhost:4000/api/admin/approved-passes", {
+        headers: { Authorization: `Bearer ${token}` },
       }).then(r => r.json())
     ])
-      .then(([studentData, passengerData]) => {
+      .then(([studentData, passengerData, approvedData]) => {
         if (studentData.items) setCollegeItems(studentData.items);
         if (passengerData.items) setPassengerItems(passengerData.items);
+        if (approvedData.students) setApprovedStudents(approvedData.students);
+        if (approvedData.passengers) setApprovedPassengers(approvedData.passengers);
         setLoading(false);
       })
       .catch((e) => {
@@ -64,30 +75,73 @@ export default function AdminDashboard({ onLogout }: Props) {
 
   const approve = (id: number) => {
     setApproving(id);
+    setApproveProgress(0);
+    setApproveStage("Initializing...");
+    
     const token = localStorage.getItem("sbp_token");
     
     const endpoint = tab === "college" 
       ? `http://localhost:4000/api/admin/registrations/${id}/approve`
       : `http://localhost:4000/api/admin/passenger-registrations/${id}/approve`;
 
+    // Simulate progress stages for reading RFID card UID
+    const progressIntervals = [
+      { progress: 15, stage: "📋 Loading registration...", delay: 200 },
+      { progress: 30, stage: "🔑 Generating unique pass ID...", delay: 600 },
+      { progress: 45, stage: "� Waiting for RFID card tap...", delay: 900 },
+      { progress: 65, stage: "📖 Reading card UID from EM-18...", delay: 1200 },
+      { progress: 85, stage: "✅ Card UID captured!", delay: 1800 },
+      { progress: 95, stage: "💾 Saving to database...", delay: 2200 },
+    ];
+
+    progressIntervals.forEach((interval) => {
+      setTimeout(() => {
+        setApproveProgress(interval.progress);
+        setApproveStage(interval.stage);
+      }, interval.delay);
+    });
+
     fetch(endpoint, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ simulate: false })
     })
       .then((r) => r.json())
       .then((json) => {
         if (json.busPass || json.registration) {
+          // Show 100% completion
+          setApproveProgress(100);
+          setApproveStage("✅ Pass created successfully!");
+          
+          // Show success with unique ID
+          setApproveSuccess({
+            uniquePassId: json.uniquePassId || "N/A",
+            rfidUid: json.rfidUid || "N/A"
+          });
+          
           if (tab === "college") {
             setCollegeItems((s) => s.filter((it) => it.id !== id));
           } else {
             setPassengerItems((s) => s.filter((it) => it.id !== id));
           }
         } else {
+          setApproveProgress(0);
+          setApproveStage("");
           alert("Error: " + JSON.stringify(json));
         }
       })
-      .catch((e) => alert(String(e)))
-      .finally(() => setApproving(null));
+      .catch((e) => {
+        setApproveProgress(0);
+        setApproveStage("");
+        alert(String(e));
+      })
+      .finally(() => {
+        setTimeout(() => {
+          setApproving(null);
+          setApproveProgress(0);
+          setApproveStage("");
+        }, 2000);
+      });
   };
 
   const decline = async () => {
@@ -128,7 +182,46 @@ export default function AdminDashboard({ onLogout }: Props) {
     }
   };
 
-  const items = tab === "college" ? collegeItems : passengerItems;
+  const deletePass = (id: number, type: "student" | "passenger") => {
+    if (!confirm("Hide this pass from dashboard?")) return;
+    
+    setDeleting(id);
+    const token = localStorage.getItem("sbp_token");
+    const endpoint = type === "student" 
+      ? `http://localhost:4000/api/admin/student-passes/${id}/hide`
+      : `http://localhost:4000/api/admin/passenger-passes/${id}/hide`;
+
+    fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(json => {
+        if (json.success) {
+          if (type === "student") {
+            setApprovedStudents(s => s.filter(it => it.id !== id));
+          } else {
+            setApprovedPassengers(s => s.filter(it => it.id !== id));
+          }
+        } else {
+          alert("Error: " + JSON.stringify(json));
+        }
+      })
+      .catch(e => alert(String(e)))
+      .finally(() => setDeleting(null));
+  };
+
+  const getItems = () => {
+    if (tab === "college") return collegeItems;
+    if (tab === "passenger") return passengerItems;
+    if (tab === "approved") {
+      return [...approvedStudents.map(s => ({ ...s, type: "student" })), 
+              ...approvedPassengers.map(p => ({ ...p, type: "passenger" }))];
+    }
+    return [];
+  };
+
+  const items = getItems();
 
   return (
     <div style={{ maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
@@ -227,6 +320,23 @@ export default function AdminDashboard({ onLogout }: Props) {
         >
           🎫 Passengers
         </button>
+        <button
+          onClick={() => setTab("approved")}
+          style={{
+            padding: "12px 20px",
+            border: "none",
+            background: "transparent",
+            color: tab === "approved" ? "#8b5cf6" : "#6b7280",
+            fontSize: "1rem",
+            fontWeight: tab === "approved" ? "700" : "500",
+            cursor: "pointer",
+            borderBottom: tab === "approved" ? "3px solid #8b5cf6" : "none",
+            transition: "all 0.2s ease",
+            marginBottom: "-2px"
+          }}
+        >
+          ✅ Approved Passes
+        </button>
       </div>
 
       {error && (
@@ -310,34 +420,70 @@ export default function AdminDashboard({ onLogout }: Props) {
                       )}
                       <td style={{ padding: "14px", textAlign: "center" }}>
                         {tab === "college" ? (
-                          <button
-                            onClick={() => approve(it.id)}
-                            disabled={approving === it.id}
-                            style={{
-                              padding: "8px 16px",
-                              background: approving === it.id ? "#d1d5db" : "linear-gradient(90deg, #10b981, #059669)",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "6px",
-                              cursor: approving === it.id ? "not-allowed" : "pointer",
-                              fontSize: "0.9rem",
-                              fontWeight: "600",
-                              transition: "all 0.3s ease"
-                            }}
-                            onMouseOver={(e) => {
-                              if (approving !== it.id) {
-                                e.currentTarget.style.transform = "translateY(-2px)";
-                                e.currentTarget.style.boxShadow = "0 4px 12px rgba(16,185,129,0.3)";
-                              }
-                            }}
-                            onMouseOut={(e) => {
-                              e.currentTarget.style.transform = "none";
-                              e.currentTarget.style.boxShadow = "none";
-                            }}
-                          >
-                            {approving === it.id ? "⏳ Approving..." : "✅ Approve"}
-                          </button>
-                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
+                            <button
+                              onClick={() => approve(it.id)}
+                              disabled={approving === it.id}
+                              style={{
+                                padding: "8px 16px",
+                                background: approving === it.id ? "#d1d5db" : "linear-gradient(90deg, #10b981, #059669)",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "6px",
+                                cursor: approving === it.id ? "not-allowed" : "pointer",
+                                fontSize: "0.9rem",
+                                fontWeight: "600",
+                                transition: "all 0.3s ease",
+                                minWidth: "140px"
+                              }}
+                              onMouseOver={(e) => {
+                                if (approving !== it.id) {
+                                  e.currentTarget.style.transform = "translateY(-2px)";
+                                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(16,185,129,0.3)";
+                                }
+                              }}
+                              onMouseOut={(e) => {
+                                e.currentTarget.style.transform = "none";
+                                e.currentTarget.style.boxShadow = "none";
+                              }}
+                            >
+                              {approving === it.id ? "⏳ Approving..." : "✅ Approve"}
+                            </button>
+                            {approving === it.id && (
+                              <div style={{ width: "100%", minWidth: "180px" }}>
+                                {/* Progress bar */}
+                                <div style={{
+                                  width: "100%",
+                                  height: "6px",
+                                  background: "#e5e7eb",
+                                  borderRadius: "3px",
+                                  overflow: "hidden",
+                                  marginBottom: "6px"
+                                }}>
+                                  <div style={{
+                                    height: "100%",
+                                    width: `${approveProgress}%`,
+                                    background: "linear-gradient(90deg, #10b981, #059669)",
+                                    transition: "width 0.3s ease",
+                                    borderRadius: "3px"
+                                  }} />
+                                </div>
+                                {/* Progress text */}
+                                <div style={{
+                                  fontSize: "0.75rem",
+                                  color: "#6b7280",
+                                  textAlign: "center",
+                                  lineHeight: "1.4"
+                                }}>
+                                  <div>{approveStage}</div>
+                                  <div style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "2px" }}>
+                                    {approveProgress}%
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : tab === "passenger" ? (
                           <button
                             onClick={() => setSelectedPassenger(it)}
                             style={{
@@ -362,6 +508,98 @@ export default function AdminDashboard({ onLogout }: Props) {
                           >
                             👁️ View Details
                           </button>
+                        ) : (
+                          <div style={{ display: "flex", gap: "8px", flexDirection: "column", alignItems: "center" }}>
+                            <button
+                              onClick={() => approve(it.id)}
+                              disabled={approving === it.id}
+                              style={{
+                                padding: "8px 16px",
+                                background: approving === it.id ? "#d1d5db" : "linear-gradient(90deg, #f59e0b, #d97706)",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "6px",
+                                cursor: approving === it.id ? "not-allowed" : "pointer",
+                                fontSize: "0.9rem",
+                                fontWeight: "600",
+                                transition: "all 0.3s ease",
+                                minWidth: "140px"
+                              }}
+                              onMouseOver={(e) => {
+                                if (approving !== it.id) {
+                                  e.currentTarget.style.transform = "translateY(-2px)";
+                                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(245,158,11,0.3)";
+                                }
+                              }}
+                              onMouseOut={(e) => {
+                                e.currentTarget.style.transform = "none";
+                                e.currentTarget.style.boxShadow = "none";
+                              }}
+                            >
+                              {approving === it.id ? "⏳ Generating..." : "🎫 Generate Pass"}
+                            </button>
+                            {approving === it.id && (
+                              <div style={{ width: "100%", minWidth: "180px" }}>
+                                {/* Progress bar */}
+                                <div style={{
+                                  width: "100%",
+                                  height: "6px",
+                                  background: "#e5e7eb",
+                                  borderRadius: "3px",
+                                  overflow: "hidden",
+                                  marginBottom: "6px"
+                                }}>
+                                  <div style={{
+                                    height: "100%",
+                                    width: `${approveProgress}%`,
+                                    background: "linear-gradient(90deg, #f59e0b, #d97706)",
+                                    transition: "width 0.3s ease",
+                                    borderRadius: "3px"
+                                  }} />
+                                </div>
+                                {/* Progress text */}
+                                <div style={{
+                                  fontSize: "0.75rem",
+                                  color: "#6b7280",
+                                  textAlign: "center",
+                                  lineHeight: "1.4"
+                                }}>
+                                  <div>{approveStage}</div>
+                                  <div style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "2px" }}>
+                                    {approveProgress}%
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            <button
+                              onClick={() => deletePass(it.id, (it as any).type || "student")}
+                              disabled={deleting === it.id}
+                              style={{
+                                padding: "6px 12px",
+                                background: deleting === it.id ? "#d1d5db" : "#ef4444",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "6px",
+                                cursor: deleting === it.id ? "not-allowed" : "pointer",
+                                fontSize: "0.85rem",
+                                fontWeight: "600",
+                                transition: "all 0.3s ease",
+                                minWidth: "100px"
+                              }}
+                              onMouseOver={(e) => {
+                                if (deleting !== it.id) {
+                                  e.currentTarget.style.transform = "translateY(-2px)";
+                                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(239,68,68,0.3)";
+                                }
+                              }}
+                              onMouseOut={(e) => {
+                                e.currentTarget.style.transform = "none";
+                                e.currentTarget.style.boxShadow = "none";
+                              }}
+                            >
+                              {deleting === it.id ? "⏳ Hiding..." : "🗑️ Hide"}
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -374,7 +612,7 @@ export default function AdminDashboard({ onLogout }: Props) {
       </div>
 
       {/* Passenger Details Modal */}
-      {selectedPassenger && (
+      {selectedPassenger && !approveSuccess && (
         <div style={{
           position: "fixed",
           top: 0,
@@ -665,6 +903,241 @@ export default function AdminDashboard({ onLogout }: Props) {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approval Success Modal */}
+      {/* Progress Modal - Shows while approving */}
+      {approving !== null && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 999
+        }}>
+          <div style={{
+            background: "#fff",
+            borderRadius: "12px",
+            maxWidth: "420px",
+            width: "90%",
+            boxShadow: "0 20px 25px rgba(0,0,0,0.3)",
+            overflow: "hidden"
+          }}>
+            <div style={{
+              background: "linear-gradient(135deg, #3b82f6, #1e40af)",
+              padding: "28px 24px",
+              color: "#fff",
+              textAlign: "center"
+            }}>
+              <div style={{ fontSize: "2rem", marginBottom: "12px", animation: "spin 1s linear infinite" }}>⏳</div>
+              <h3 style={{ margin: "0 0 8px 0", fontSize: "1.3rem", fontWeight: "600" }}>Processing Pass Request</h3>
+              <p style={{ margin: 0, opacity: 0.9, fontSize: "0.9rem" }}>Writing data to RFID card...</p>
+            </div>
+
+            <div style={{ padding: "28px 24px" }}>
+              {/* Large progress bar */}
+              <div style={{
+                width: "100%",
+                height: "10px",
+                background: "#e5e7eb",
+                borderRadius: "5px",
+                overflow: "hidden",
+                marginBottom: "16px"
+              }}>
+                <div style={{
+                  height: "100%",
+                  width: `${approveProgress}%`,
+                  background: "linear-gradient(90deg, #3b82f6, #1e40af)",
+                  transition: "width 0.4s ease",
+                  borderRadius: "5px",
+                  boxShadow: "0 0 10px rgba(59,130,246,0.5)"
+                }} />
+              </div>
+
+              {/* Stage description */}
+              <div style={{
+                textAlign: "center",
+                marginBottom: "16px"
+              }}>
+                <div style={{
+                  fontSize: "0.95rem",
+                  color: "#1f2937",
+                  fontWeight: "500",
+                  lineHeight: "1.5"
+                }}>
+                  {approveStage}
+                </div>
+                <div style={{
+                  fontSize: "1.8rem",
+                  fontWeight: "700",
+                  color: "#3b82f6",
+                  marginTop: "8px"
+                }}>
+                  {approveProgress}%
+                </div>
+              </div>
+
+              {/* Sub-steps */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "8px",
+                fontSize: "0.75rem",
+                color: "#6b7280"
+              }}>
+                <div style={{ padding: "8px", background: approveProgress >= 15 ? "#dbeafe" : "#f3f4f6", borderRadius: "4px" }}>
+                  {approveProgress >= 15 ? "✅" : "⏳"} Loading
+                </div>
+                <div style={{ padding: "8px", background: approveProgress >= 30 ? "#dbeafe" : "#f3f4f6", borderRadius: "4px" }}>
+                  {approveProgress >= 30 ? "✅" : "⏳"} ID Gen
+                </div>
+                <div style={{ padding: "8px", background: approveProgress >= 45 ? "#dbeafe" : "#f3f4f6", borderRadius: "4px" }}>
+                  {approveProgress >= 45 ? "✅" : "⏳"} Payload
+                </div>
+                <div style={{ padding: "8px", background: approveProgress >= 65 ? "#dbeafe" : "#f3f4f6", borderRadius: "4px" }}>
+                  {approveProgress >= 65 ? "✅" : "⏳"} Write Card
+                </div>
+                <div style={{ padding: "8px", background: approveProgress >= 85 ? "#dbeafe" : "#f3f4f6", borderRadius: "4px" }}>
+                  {approveProgress >= 85 ? "✅" : "⏳"} Verify
+                </div>
+                <div style={{ padding: "8px", background: approveProgress >= 95 ? "#dbeafe" : "#f3f4f6", borderRadius: "4px" }}>
+                  {approveProgress >= 95 ? "✅" : "⏳"} Save
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+
+      {approveSuccess && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: "#fff",
+            borderRadius: "12px",
+            maxWidth: "500px",
+            width: "90%",
+            boxShadow: "0 20px 25px rgba(0,0,0,0.2)",
+            overflow: "hidden"
+          }}>
+            <div style={{
+              background: "linear-gradient(135deg, #10b981, #059669)",
+              padding: "24px",
+              color: "#fff",
+              textAlign: "center"
+            }}>
+              <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>✅</div>
+              <h2 style={{ margin: "0 0 8px 0", fontSize: "1.5rem" }}>Pass Approved!</h2>
+              <p style={{ margin: 0, opacity: 0.9 }}>RFID card data written successfully</p>
+            </div>
+
+            <div style={{ padding: "24px" }}>
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "8px", fontWeight: "600" }}>
+                  🆔 Unique Pass ID (for app login)
+                </label>
+                <div style={{
+                  padding: "12px",
+                  background: "#f3f4f6",
+                  border: "2px solid #10b981",
+                  borderRadius: "8px",
+                  fontFamily: "monospace",
+                  fontSize: "1.1rem",
+                  color: "#0b1220",
+                  fontWeight: "600",
+                  wordBreak: "break-all",
+                  textAlign: "center"
+                }}>
+                  {approveSuccess.uniquePassId}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: "24px" }}>
+                <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "8px", fontWeight: "600" }}>
+                  📱 RFID UID (card identifier)
+                </label>
+                <div style={{
+                  padding: "12px",
+                  background: "#f3f4f6",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "8px",
+                  fontFamily: "monospace",
+                  fontSize: "0.95rem",
+                  color: "#0b1220",
+                  wordBreak: "break-all",
+                  textAlign: "center"
+                }}>
+                  {approveSuccess.rfidUid}
+                </div>
+              </div>
+
+              <p style={{
+                color: "#6b7280",
+                fontSize: "0.9rem",
+                margin: "16px 0",
+                padding: "12px",
+                background: "#f0fdf4",
+                borderRadius: "8px",
+                borderLeft: "3px solid #10b981"
+              }}>
+                ℹ️ The passenger can use the <strong>Unique Pass ID</strong> to login to the mobile app and view their pass information.
+              </p>
+
+              <button
+                onClick={() => {
+                  setApproveSuccess(null);
+                  setSelectedPassenger(null);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  background: "#10b981",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                  fontSize: "0.95rem",
+                  transition: "all 0.3s ease"
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = "#059669";
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(16,185,129,0.3)";
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = "#10b981";
+                  e.currentTarget.style.transform = "none";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              >
+                ✅ Done
+              </button>
             </div>
           </div>
         </div>

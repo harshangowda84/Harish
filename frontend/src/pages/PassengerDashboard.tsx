@@ -20,6 +20,9 @@ type PassengerRegistration = {
   documents: string;
   createdAt: string;
   updatedAt: string;
+  uniquePassId?: string;
+  rfidUid?: string;
+  passValidity?: string;
 };
 
 export default function PassengerDashboard({ onLogout }: Props) {
@@ -994,6 +997,39 @@ export default function PassengerDashboard({ onLogout }: Props) {
                             </p>
                             <p style={{ margin: 0, fontSize: "0.85rem" }}>
                               {app.declineReason}
+                            </p>
+                          </div>
+                        )}
+                        {app.status === "approved" && app.uniquePassId && (
+                          <div style={{
+                            background: "#f0fdf4",
+                            border: "2px solid #10b981",
+                            borderRadius: "8px",
+                            padding: "12px",
+                            marginTop: "12px",
+                            color: "#166534"
+                          }}>
+                            <p style={{ margin: "0 0 8px 0", fontSize: "0.9rem", fontWeight: "600", color: "#059669" }}>
+                              ✅ Your Pass is Ready!
+                            </p>
+                            <p style={{ margin: "0 0 8px 0", fontSize: "0.85rem" }}>
+                              <strong>🆔 Unique Pass ID:</strong>
+                            </p>
+                            <div style={{
+                              background: "#fff",
+                              padding: "8px",
+                              borderRadius: "6px",
+                              fontFamily: "monospace",
+                              fontSize: "0.9rem",
+                              textAlign: "center",
+                              color: "#0b1220",
+                              fontWeight: "600",
+                              userSelect: "all"
+                            }}>
+                              {app.uniquePassId}
+                            </div>
+                            <p style={{ margin: "8px 0 0 0", fontSize: "0.8rem", color: "#6b7280" }}>
+                              Use this ID to login to the mobile app
                             </p>
                           </div>
                         )}

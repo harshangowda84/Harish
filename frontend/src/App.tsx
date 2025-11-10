@@ -2,13 +2,15 @@ import React, { useState, useEffect } from "react";
 import CollegeLogin from "./pages/CollegeLogin";
 import PassengerLogin from "./pages/PassengerLogin";
 import AdminLogin from "./pages/AdminLogin";
+import ConductorLogin from "./pages/ConductorLogin";
 import CollegeDashboard from "./pages/CollegeDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import PassengerDashboard from "./pages/PassengerDashboard";
+import ConductorDashboard from "./pages/ConductorDashboard";
 
 export default function App() {
   const [page, setPage] = useState<
-    "home" | "college" | "passenger" | "admin" | "college-dashboard" | "admin-dashboard" | "passenger-dashboard"
+    "home" | "college" | "passenger" | "admin" | "conductor" | "college-dashboard" | "admin-dashboard" | "passenger-dashboard" | "conductor-dashboard"
   >("home");
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -42,6 +44,8 @@ export default function App() {
       setPage("admin-dashboard");
     } else if (role === "passenger") {
       setPage("passenger-dashboard");
+    } else if (role === "conductor") {
+      setPage("conductor-dashboard");
     }
   };
 
@@ -261,6 +265,30 @@ export default function App() {
                     }}
                   >
                     👨‍💼 Admin Login
+                  </button>
+                  <button
+                    onClick={() => setPage("conductor")}
+                    style={{
+                      padding: "12px 24px",
+                      fontSize: "0.95rem",
+                      fontWeight: "600",
+                      border: "2px solid #8b5cf6",
+                      borderRadius: "8px",
+                      background: "transparent",
+                      color: "#8b5cf6",
+                      cursor: "pointer",
+                      transition: "all 0.3s ease"
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.background = "#faf5ff";
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.transform = "none";
+                    }}
+                  >
+                    🚌 Conductor Panel
                   </button>
                 </div>
               </div>
@@ -637,9 +665,11 @@ export default function App() {
         {page === "college" && <CollegeLogin onLoginSuccess={handleLoginSuccess} onBack={() => setPage("home")} />}
         {page === "passenger" && <PassengerLogin onLoginSuccess={handleLoginSuccess} onBack={() => setPage("home")} />}
         {page === "admin" && <AdminLogin onLoginSuccess={handleLoginSuccess} onBack={() => setPage("home")} />}
+        {page === "conductor" && <ConductorLogin onLoginSuccess={(token) => { localStorage.setItem("sbp_token", token); localStorage.setItem("sbp_role", "conductor"); setPage("conductor-dashboard"); }} />}
         {page === "college-dashboard" && <CollegeDashboard onLogout={handleLogout} />}
         {page === "admin-dashboard" && <AdminDashboard onLogout={handleLogout} />}
         {page === "passenger-dashboard" && <PassengerDashboard onLogout={handleLogout} />}
+        {page === "conductor-dashboard" && <ConductorDashboard onLogout={handleLogout} />}
       </main>
 
       <footer className="site-footer">
