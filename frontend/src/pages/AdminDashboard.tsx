@@ -603,33 +603,43 @@ export default function AdminDashboard({ onLogout }: Props) {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", borderBottom: "2px solid #e5e7eb", flexWrap: "wrap" }}>
+      <div style={{ 
+        display: "flex", 
+        gap: "8px", 
+        marginBottom: "24px",
+        padding: "6px",
+        background: "#f3f4f6",
+        borderRadius: "12px",
+        flexWrap: "wrap",
+        width: "fit-content"
+      }}>
         <button
           onClick={() => setTab("college")}
           style={{
-            padding: "12px 20px",
+            padding: "10px 18px",
             border: "none",
-            background: tab === "college" ? "#eff6ff" : "transparent",
+            background: tab === "college" ? "#fff" : "transparent",
             color: tab === "college" ? "#3b82f6" : "#6b7280",
-            fontSize: "1rem",
+            fontSize: "0.95rem",
             fontWeight: tab === "college" ? "700" : "500",
             cursor: "pointer",
-            borderBottom: tab === "college" ? "3px solid #3b82f6" : "none",
-            transition: "all 0.2s ease",
-            marginBottom: "-2px",
-            borderRadius: "8px 8px 0 0",
+            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            borderRadius: "8px",
             display: "flex",
             alignItems: "center",
-            gap: "8px"
+            gap: "8px",
+            boxShadow: tab === "college" ? "0 2px 8px rgba(59,130,246,0.15)" : "none"
           }}
           onMouseOver={(e) => {
             if (tab !== "college") {
-              e.currentTarget.style.background = "#f3f4f6";
+              e.currentTarget.style.background = "rgba(59,130,246,0.08)";
+              e.currentTarget.style.color = "#3b82f6";
             }
           }}
           onMouseOut={(e) => {
             if (tab !== "college") {
               e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "#6b7280";
             }
           }}
         >
@@ -638,10 +648,12 @@ export default function AdminDashboard({ onLogout }: Props) {
             <span style={{
               background: "#3b82f6",
               color: "#fff",
-              borderRadius: "12px",
-              padding: "2px 8px",
-              fontSize: "0.75rem",
-              fontWeight: "700"
+              borderRadius: "10px",
+              padding: "2px 6px",
+              fontSize: "0.7rem",
+              fontWeight: "700",
+              minWidth: "20px",
+              textAlign: "center"
             }}>
               {collegeItems.length}
             </span>
@@ -650,29 +662,30 @@ export default function AdminDashboard({ onLogout }: Props) {
         <button
           onClick={() => setTab("passenger")}
           style={{
-            padding: "12px 20px",
+            padding: "10px 18px",
             border: "none",
-            background: tab === "passenger" ? "#f0fdf4" : "transparent",
+            background: tab === "passenger" ? "#fff" : "transparent",
             color: tab === "passenger" ? "#10b981" : "#6b7280",
-            fontSize: "1rem",
+            fontSize: "0.95rem",
             fontWeight: tab === "passenger" ? "700" : "500",
             cursor: "pointer",
-            borderBottom: tab === "passenger" ? "3px solid #10b981" : "none",
-            transition: "all 0.2s ease",
-            marginBottom: "-2px",
-            borderRadius: "8px 8px 0 0",
+            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            borderRadius: "8px",
             display: "flex",
             alignItems: "center",
-            gap: "8px"
+            gap: "8px",
+            boxShadow: tab === "passenger" ? "0 2px 8px rgba(16,185,129,0.15)" : "none"
           }}
           onMouseOver={(e) => {
             if (tab !== "passenger") {
-              e.currentTarget.style.background = "#f3f4f6";
+              e.currentTarget.style.background = "rgba(16,185,129,0.08)";
+              e.currentTarget.style.color = "#10b981";
             }
           }}
           onMouseOut={(e) => {
             if (tab !== "passenger") {
               e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "#6b7280";
             }
           }}
         >
@@ -681,10 +694,12 @@ export default function AdminDashboard({ onLogout }: Props) {
             <span style={{
               background: "#10b981",
               color: "#fff",
-              borderRadius: "12px",
-              padding: "2px 8px",
-              fontSize: "0.75rem",
-              fontWeight: "700"
+              borderRadius: "10px",
+              padding: "2px 6px",
+              fontSize: "0.7rem",
+              fontWeight: "700",
+              minWidth: "20px",
+              textAlign: "center"
             }}>
               {passengerItems.length}
             </span>
@@ -693,29 +708,30 @@ export default function AdminDashboard({ onLogout }: Props) {
         <button
           onClick={() => setTab("approved")}
           style={{
-            padding: "12px 20px",
+            padding: "10px 18px",
             border: "none",
-            background: tab === "approved" ? "#faf5ff" : "transparent",
+            background: tab === "approved" ? "#fff" : "transparent",
             color: tab === "approved" ? "#8b5cf6" : "#6b7280",
-            fontSize: "1rem",
+            fontSize: "0.95rem",
             fontWeight: tab === "approved" ? "700" : "500",
             cursor: "pointer",
-            borderBottom: tab === "approved" ? "3px solid #8b5cf6" : "none",
-            transition: "all 0.2s ease",
-            marginBottom: "-2px",
-            borderRadius: "8px 8px 0 0",
+            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            borderRadius: "8px",
             display: "flex",
             alignItems: "center",
-            gap: "8px"
+            gap: "8px",
+            boxShadow: tab === "approved" ? "0 2px 8px rgba(139,92,246,0.15)" : "none"
           }}
           onMouseOver={(e) => {
             if (tab !== "approved") {
-              e.currentTarget.style.background = "#f3f4f6";
+              e.currentTarget.style.background = "rgba(139,92,246,0.08)";
+              e.currentTarget.style.color = "#8b5cf6";
             }
           }}
           onMouseOut={(e) => {
             if (tab !== "approved") {
               e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "#6b7280";
             }
           }}
         >
@@ -724,10 +740,12 @@ export default function AdminDashboard({ onLogout }: Props) {
             <span style={{
               background: "#8b5cf6",
               color: "#fff",
-              borderRadius: "12px",
-              padding: "2px 8px",
-              fontSize: "0.75rem",
-              fontWeight: "700"
+              borderRadius: "10px",
+              padding: "2px 6px",
+              fontSize: "0.7rem",
+              fontWeight: "700",
+              minWidth: "20px",
+              textAlign: "center"
             }}>
               {approvedStudents.length + approvedPassengers.length}
             </span>
@@ -736,29 +754,30 @@ export default function AdminDashboard({ onLogout }: Props) {
         <button
           onClick={() => setTab("cardmgmt")}
           style={{
-            padding: "12px 20px",
+            padding: "10px 18px",
             border: "none",
-            background: tab === "cardmgmt" ? "#fef2f2" : "transparent",
+            background: tab === "cardmgmt" ? "#fff" : "transparent",
             color: tab === "cardmgmt" ? "#ef4444" : "#6b7280",
-            fontSize: "1rem",
+            fontSize: "0.95rem",
             fontWeight: tab === "cardmgmt" ? "700" : "500",
             cursor: "pointer",
-            borderBottom: tab === "cardmgmt" ? "3px solid #ef4444" : "none",
-            transition: "all 0.2s ease",
-            marginBottom: "-2px",
-            borderRadius: "8px 8px 0 0",
+            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            borderRadius: "8px",
             display: "flex",
             alignItems: "center",
-            gap: "8px"
+            gap: "8px",
+            boxShadow: tab === "cardmgmt" ? "0 2px 8px rgba(239,68,68,0.15)" : "none"
           }}
           onMouseOver={(e) => {
             if (tab !== "cardmgmt") {
-              e.currentTarget.style.background = "#f3f4f6";
+              e.currentTarget.style.background = "rgba(239,68,68,0.08)";
+              e.currentTarget.style.color = "#ef4444";
             }
           }}
           onMouseOut={(e) => {
             if (tab !== "cardmgmt") {
               e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "#6b7280";
             }
           }}
         >
@@ -1079,7 +1098,7 @@ export default function AdminDashboard({ onLogout }: Props) {
         {!loading && items.length > 0 && tab !== "cardmgmt" && (
           <div>
             <h3 style={{ margin: "0 0 20px 0", fontSize: "1.1rem", color: "#0b1220" }}>
-              {tab === "college" ? "📋 College Students Pending Approval" : tab === "passenger" ? "🎫 Passenger Pass Requests" : "📦 Approved Passes"}
+              {tab === "college" ? "📋 College Students Pending Approval" : tab === "passenger" ? "🎫 Passenger Pass Requests" : tab === "approved" ? "📦 Approved Passes" : "📦 Hidden Passes"}
             </h3>
             <div style={{ overflowX: "auto" }}>
               <table style={{
@@ -1148,12 +1167,13 @@ export default function AdminDashboard({ onLogout }: Props) {
                           </span>
                         </td>
                       )}
-                      <td style={{ padding: "14px", textAlign: "center" }}>
+                      <td style={{ padding: "14px", textAlign: "center", width: "200px", minWidth: "200px" }}>
                         {tab === "college" ? (
-                          <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "flex-start" }}>
                             <button
                               onClick={() => setSelectedPassenger(it)}
                               style={{
+                                width: "100%",
                                 padding: "8px 16px",
                                 background: "#3b82f6",
                                 color: "#fff",
@@ -1163,7 +1183,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                                 fontSize: "0.9rem",
                                 fontWeight: "600",
                                 transition: "all 0.3s ease",
-                                marginBottom: "4px"
+                                marginBottom: "0px"
                               }}
                               onMouseOver={(e) => {
                                 e.currentTarget.style.transform = "translateY(-2px)";
@@ -1180,6 +1200,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                               onClick={() => approve(it.id)}
                               disabled={approving === it.id}
                               style={{
+                                width: "100%",
                                 padding: "8px 16px",
                                 background: approving === it.id ? "#d1d5db" : "linear-gradient(90deg, #10b981, #059669)",
                                 color: "#fff",
@@ -1188,8 +1209,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                                 cursor: approving === it.id ? "not-allowed" : "pointer",
                                 fontSize: "0.9rem",
                                 fontWeight: "600",
-                                transition: "all 0.3s ease",
-                                minWidth: "140px"
+                                transition: "all 0.3s ease"
                               }}
                               onMouseOver={(e) => {
                                 if (approving !== it.id) {
@@ -1205,7 +1225,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                               {approving === it.id ? "⏳ Approving..." : "✅ Approve"}
                             </button>
                             {approving === it.id && (
-                              <div style={{ width: "100%", minWidth: "180px" }}>
+                              <div style={{ width: "100%" }}>
                                 {/* Progress bar */}
                                 <div style={{
                                   width: "100%",
@@ -1227,7 +1247,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                                 <div style={{
                                   fontSize: "0.75rem",
                                   color: "#6b7280",
-                                  textAlign: "center",
+                                  textAlign: "left",
                                   lineHeight: "1.4"
                                 }}>
                                   <div>{approveStage}</div>
@@ -1242,6 +1262,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                           <button
                             onClick={() => setSelectedPassenger(it)}
                             style={{
+                              width: "100%",
                               padding: "8px 16px",
                               background: "#3b82f6",
                               color: "#fff",
@@ -1264,11 +1285,12 @@ export default function AdminDashboard({ onLogout }: Props) {
                             👁️ View Details
                           </button>
                         ) : (
-                          <div style={{ display: "flex", gap: "8px", flexDirection: "column", alignItems: "center" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "flex-start" }}>
                             <button
                               onClick={() => generatePass(it.id, (it as any).type || "passenger")}
                               disabled={approving === it.id}
                               style={{
+                                width: "100%",
                                 padding: "8px 16px",
                                 background: approving === it.id ? "#d1d5db" : "linear-gradient(90deg, #f59e0b, #d97706)",
                                 color: "#fff",
@@ -1277,8 +1299,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                                 cursor: approving === it.id ? "not-allowed" : "pointer",
                                 fontSize: "0.9rem",
                                 fontWeight: "600",
-                                transition: "all 0.3s ease",
-                                minWidth: "140px"
+                                transition: "all 0.3s ease"
                               }}
                               onMouseOver={(e) => {
                                 if (approving !== it.id) {
@@ -1294,7 +1315,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                               {approving === it.id ? "⏳ Generating..." : "🎫 Generate Pass"}
                             </button>
                             {approving === it.id && (
-                              <div style={{ width: "100%", minWidth: "180px" }}>
+                              <div style={{ width: "100%" }}>
                                 {/* Progress bar */}
                                 <div style={{
                                   width: "100%",
@@ -1316,7 +1337,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                                 <div style={{
                                   fontSize: "0.75rem",
                                   color: "#6b7280",
-                                  textAlign: "center",
+                                  textAlign: "left",
                                   lineHeight: "1.4"
                                 }}>
                                   <div>{approveStage}</div>
@@ -1326,34 +1347,6 @@ export default function AdminDashboard({ onLogout }: Props) {
                                 </div>
                               </div>
                             )}
-                            <button
-                              onClick={() => deletePass(it.id, (it as any).type || "student")}
-                              disabled={deleting === it.id}
-                              style={{
-                                padding: "6px 12px",
-                                background: deleting === it.id ? "#d1d5db" : "#ef4444",
-                                color: "#fff",
-                                border: "none",
-                                borderRadius: "6px",
-                                cursor: deleting === it.id ? "not-allowed" : "pointer",
-                                fontSize: "0.85rem",
-                                fontWeight: "600",
-                                transition: "all 0.3s ease",
-                                minWidth: "100px"
-                              }}
-                              onMouseOver={(e) => {
-                                if (deleting !== it.id) {
-                                  e.currentTarget.style.transform = "translateY(-2px)";
-                                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(239,68,68,0.3)";
-                                }
-                              }}
-                              onMouseOut={(e) => {
-                                e.currentTarget.style.transform = "none";
-                                e.currentTarget.style.boxShadow = "none";
-                              }}
-                            >
-                              {deleting === it.id ? "⏳ Hiding..." : "🗑️ Hide"}
-                            </button>
                           </div>
                         )}
                       </td>

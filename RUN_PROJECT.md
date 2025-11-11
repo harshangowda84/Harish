@@ -143,7 +143,7 @@ taskkill /F /IM node.exe
 
 ## 📝 Notes
 
-- **Timeout**: 30 seconds to place card after clicking scan/generate
+- **Timeout**: 10 seconds to place card after clicking scan/generate
 - **Port**: COM5 is hardcoded (change in `backend/src/utils/rfid.ts`)
 - **Database**: SQLite file at `backend/prisma/dev.db`
 - **RFID**: EM-18 is read-only (reads UID only, stores data in database)

@@ -674,7 +674,6 @@ export default function App() {
 
       <footer className="site-footer">
         <div>© {new Date().getFullYear()} BMTC Smart Bus Pass</div>
-        <div className="muted">Built for demo & college projects — change secrets before production.</div>
       </footer>
 
       

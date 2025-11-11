@@ -88,18 +88,19 @@ export async function writeToRFIDCard(
         reject(err);
       });
 
-      // Timeout after 30 seconds (give user time to place card)
+      // Timeout after 10 seconds for card write operations (user has 10s to place card)
+      // This ensures admin doesn't wait indefinitely if card reader has issues
       setTimeout(() => {
         if (!dataReceived) {
-          console.log("⏰ Timeout: No card detected after 30 seconds");
+          console.log("⏰ Timeout: No card detected after 10 seconds");
           console.log("💡 Please check:");
           console.log("   - EM-18 is powered (LED should be on)");
           console.log("   - Card is placed within 5cm of reader");
           console.log("   - Correct COM port (currently using: " + serialPort + ")");
           port.close();
-          reject(new Error("RFID read timeout - no card detected"));
+          reject(new Error("RFID write operation timed out after 10 seconds - no card detected. Please check the card reader and try again."));
         }
-      }, 30000);
+      }, 10000);
     });
   } catch (err) {
     console.error("Error reading RFID card UID:", err);

@@ -141,6 +141,13 @@ router.post('/registrations/:id/approve', async (req, res) => {
   const { simulate = false, force = false } = req.body; // force=true to overwrite existing pass
   
   try {
+    // Check if already approved (i.e., this is a "Generate Pass" on already-approved registration)
+    const existingReg = await prisma.studentRegistration.findUnique({
+      where: { id: Number(id) }
+    });
+
+    const isRegenerate = existingReg?.status === 'approved'; // Already approved, just regenerating card
+
     const reg = await prisma.studentRegistration.update({
       where: { id: Number(id) },
       data: { status: 'approved' },
@@ -148,8 +155,18 @@ router.post('/registrations/:id/approve', async (req, res) => {
 
     // Generate unique pass ID and write to RFID
     const uniquePassId = generateUniquePassId();
-    const passValidity = new Date();
-    passValidity.setFullYear(passValidity.getFullYear() + 1);
+    
+    // Calculate expiry ONLY on first approval, keep existing date on regenerate
+    let passValidity: Date;
+
+    if (!isRegenerate && !reg.passValidity) {
+      // First time approval - calculate 1 year validity
+      passValidity = new Date();
+      passValidity.setFullYear(passValidity.getFullYear() + 1);
+    } else {
+      // Already has validity date (regenerate) - keep existing date
+      passValidity = reg.passValidity || new Date(); // Fallback if somehow null
+    }
 
     const payload = prepareRFIDPayload({
       uniquePassId,
@@ -163,10 +180,10 @@ router.post('/registrations/:id/approve', async (req, res) => {
     // Write to RFID card
     const rfidUid = await writeToRFIDCard(payload, 'COM5', simulate);
 
-    // Check if this card already has a valid pass (unless force=true)
+    // Check if this card already has a valid pass from ANOTHER registration (unless force=true)
     if (!force && rfidUid) {
       const existingStudent = await prisma.studentRegistration.findFirst({
-        where: { rfidUid }
+        where: { rfidUid, id: { not: Number(id) } } // Don't check against itself
       });
       const existingPassenger = await prisma.passengerRegistration.findFirst({
         where: { rfidUid }
@@ -260,6 +277,13 @@ router.post('/passenger-registrations/:id/approve', async (req, res) => {
   console.log(`🎫 Approving passenger registration ${id}, simulate=${simulate}`);
 
   try {
+    // Check if already approved (i.e., this is a "Generate Pass" on already-approved pass)
+    const existingReg = await prisma.passengerRegistration.findUnique({
+      where: { id: Number(id) }
+    });
+
+    const isRegenerate = existingReg?.status === 'approved'; // Already approved, just regenerating card
+
     const reg = await prisma.passengerRegistration.update({
       where: { id: Number(id) },
       data: { status: 'approved' }
@@ -268,17 +292,26 @@ router.post('/passenger-registrations/:id/approve', async (req, res) => {
     // Generate unique pass ID and write to RFID
     const uniquePassId = generateUniquePassId();
     
-    // Calculate expiry based on pass type
-    const passValidity = new Date();
-    if (reg.passType === 'day') {
-      passValidity.setHours(passValidity.getHours() + 24);
-    } else if (reg.passType === 'weekly') {
-      passValidity.setDate(passValidity.getDate() + 7);
-    } else if (reg.passType === 'monthly') {
-      passValidity.setDate(passValidity.getDate() + 30);
+    // Calculate expiry based on pass type ONLY on first approval
+    // On subsequent "Generate Pass" taps, keep the existing expiry date
+    let passValidity: Date;
+
+    if (!isRegenerate && !reg.passValidity) {
+      // First time approval - calculate expiry date
+      passValidity = new Date();
+      if (reg.passType === 'day') {
+        passValidity.setHours(passValidity.getHours() + 24);
+      } else if (reg.passType === 'weekly') {
+        passValidity.setDate(passValidity.getDate() + 7);
+      } else if (reg.passType === 'monthly') {
+        passValidity.setDate(passValidity.getDate() + 30);
+      } else {
+        // Default to 1 year for any other type
+        passValidity.setFullYear(passValidity.getFullYear() + 1);
+      }
     } else {
-      // Default to 1 year for any other type
-      passValidity.setFullYear(passValidity.getFullYear() + 1);
+      // Already has validity date (regenerate) - keep existing date
+      passValidity = reg.passValidity || new Date(); // Fallback if somehow null
     }
 
     const payload = prepareRFIDPayload({
