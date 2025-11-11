@@ -9,17 +9,35 @@ router.post('/students', async (req, res) => {
   const { studentName, studentId, course, collegeId, uploadedBy } = req.body;
   if (!studentName || !studentId || !collegeId) return res.status(400).json({ error: 'missing_fields' });
 
-  const reg = await prisma.studentRegistration.create({
-    data: {
-      studentName,
-      studentId,
-      course: course || null,
-      collegeId: Number(collegeId),
-      status: 'pending',
-    },
-  });
+  try {
+    // Check if studentId already exists
+    const existing = await prisma.studentRegistration.findFirst({
+      where: { studentId }
+    });
 
-  res.status(201).json({ registration: reg });
+    if (existing) {
+      return res.status(409).json({ 
+        error: 'duplicate_student_id',
+        message: `Student ID "${studentId}" already exists`,
+        existingStudent: existing.studentName
+      });
+    }
+
+    const reg = await prisma.studentRegistration.create({
+      data: {
+        studentName,
+        studentId,
+        course: course || null,
+        collegeId: Number(collegeId),
+        status: 'pending',
+      },
+    });
+
+    res.status(201).json({ registration: reg });
+  } catch (err) {
+    console.error('Error creating student registration:', err);
+    res.status(500).json({ error: 'failed_to_create', message: String(err) });
+  }
 });
 
 // GET /api/college/students?status=pending - list registrations for a college

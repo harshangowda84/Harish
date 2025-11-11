@@ -35,8 +35,11 @@ export default function AdminDashboard({ onLogout }: Props) {
   const [declineReason, setDeclineReason] = useState("");
   const [isDeclineOpen, setIsDeclineOpen] = useState(false);
   const [approveSuccess, setApproveSuccess] = useState<{ uniquePassId: string; rfidUid: string } | null>(null);
+  const [approveError, setApproveError] = useState<{ message: string; details?: string } | null>(null);
   const [approveProgress, setApproveProgress] = useState<number>(0); // 0-100
   const [approveStage, setApproveStage] = useState<string>(""); // Current stage description
+  const [duplicateCard, setDuplicateCard] = useState<{ isStudent: boolean; name: string; type: string; expiryDate: Date } | null>(null);
+  const [duplicateCardOverride, setDuplicateCardOverride] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("sbp_token");
@@ -124,23 +127,31 @@ export default function AdminDashboard({ onLogout }: Props) {
           } else {
             setPassengerItems((s) => s.filter((it) => it.id !== id));
           }
+          
+          // Auto-close modal after success
+          setTimeout(() => {
+            setApproving(null);
+            setApproveProgress(0);
+            setApproveStage("");
+          }, 1500);
         } else {
           setApproveProgress(0);
           setApproveStage("");
-          alert("Error: " + JSON.stringify(json));
+          setApproveError({
+            message: json.error || "Failed to approve registration",
+            details: json.details
+          });
+          setApproving(null);
         }
       })
       .catch((e) => {
         setApproveProgress(0);
         setApproveStage("");
-        alert(String(e));
-      })
-      .finally(() => {
-        setTimeout(() => {
-          setApproving(null);
-          setApproveProgress(0);
-          setApproveStage("");
-        }, 2000);
+        setApproveError({
+          message: "Network error: " + String(e),
+          details: String(e)
+        });
+        setApproving(null);
       });
   };
 
@@ -182,6 +193,84 @@ export default function AdminDashboard({ onLogout }: Props) {
     }
   };
 
+  // Generate / write pass to card for an approved registration
+  const generatePass = (id: number, type: "student" | "passenger") => {
+    setApproving(id);
+    setApproveProgress(0);
+    setApproveStage("Initializing...");
+
+    const token = localStorage.getItem("sbp_token");
+    const endpoint = type === "student"
+      ? `http://localhost:4000/api/admin/registrations/${id}/approve`
+      : `http://localhost:4000/api/admin/passenger-registrations/${id}/approve`;
+
+    // Progress simulation
+    const progressIntervals = [
+      { progress: 10, stage: "📋 Preparing pass...", delay: 200 },
+      { progress: 30, stage: "🔑 Preparing card write...", delay: 600 },
+      { progress: 55, stage: "📖 Waiting for RFID card tap...", delay: 1000 },
+      { progress: 75, stage: "🔍 Reading card UID...", delay: 1600 },
+      { progress: 90, stage: "💾 Writing pass to card...", delay: 2200 }
+    ];
+
+    progressIntervals.forEach((interval) => {
+      setTimeout(() => {
+        setApproveProgress(interval.progress);
+        setApproveStage(interval.stage);
+      }, interval.delay);
+    });
+
+    fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ simulate: false })
+    })
+      .then(async (r) => {
+        if (r.status === 409) {
+          const json = await r.json();
+          // Show duplicate card modal
+          setApproveProgress(0);
+          setApproveStage("");
+          setDuplicateCard({
+            isStudent: json.existingPass?.isStudent,
+            name: json.existingPass?.name,
+            type: json.existingPass?.type,
+            expiryDate: new Date(json.existingPass?.expiryDate)
+          });
+          setDuplicateCardOverride(false);
+          (window as any).__pendingPassId = id;
+          (window as any).__pendingPassType = type;
+          setApproving(null);
+          return;
+        }
+
+        const json = await r.json();
+        if (json.registration || json.busPass) {
+          setApproveProgress(100);
+          setApproveStage("✅ Pass written to card!");
+          setApproveSuccess({ uniquePassId: json.uniquePassId || "N/A", rfidUid: json.rfidUid || "N/A" });
+          
+          // Auto-close on success
+          setTimeout(() => {
+            setApproving(null);
+            setApproveProgress(0);
+            setApproveStage("");
+          }, 1500);
+        } else {
+          setApproveProgress(0);
+          setApproveStage("");
+          setApproveError({ message: json.error || "Failed to generate pass", details: json.details });
+          setApproving(null);
+        }
+      })
+      .catch((e) => {
+        setApproveProgress(0);
+        setApproveStage("");
+        setApproveError({ message: "Network error: " + String(e), details: String(e) });
+        setApproving(null);
+      });
+  };
+
   const deletePass = (id: number, type: "student" | "passenger") => {
     if (!confirm("Hide this pass from dashboard?")) return;
     
@@ -210,6 +299,7 @@ export default function AdminDashboard({ onLogout }: Props) {
       .catch(e => alert(String(e)))
       .finally(() => setDeleting(null));
   };
+  
 
   const getItems = () => {
     if (tab === "college") return collegeItems;
@@ -346,9 +436,26 @@ export default function AdminDashboard({ onLogout }: Props) {
           padding: "16px",
           borderRadius: "8px",
           marginBottom: "20px",
-          border: "1px solid #fca5a5"
+          border: "1px solid #fca5a5",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
         }}>
-          ⚠️ {error}
+          <span>⚠️ {typeof error === 'string' ? error : 'An error occurred'}</span>
+          <button
+            onClick={() => setError(null)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#991b1b",
+              fontSize: "1.2rem",
+              cursor: "pointer",
+              padding: "0",
+              lineHeight: "1"
+            }}
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -379,7 +486,7 @@ export default function AdminDashboard({ onLogout }: Props) {
         {!loading && items.length > 0 && (
           <div>
             <h3 style={{ margin: "0 0 20px 0", fontSize: "1.1rem", color: "#0b1220" }}>
-              {tab === "college" ? "📋 College Students Pending Approval" : "🎫 Passenger Pass Requests"}
+              {tab === "college" ? "📋 College Students Pending Approval" : tab === "passenger" ? "🎫 Passenger Pass Requests" : "📦 Approved Passes"}
             </h3>
             <div style={{ overflowX: "auto" }}>
               <table style={{
@@ -390,9 +497,13 @@ export default function AdminDashboard({ onLogout }: Props) {
                 <thead>
                   <tr style={{ borderBottom: "2px solid #e5e7eb", background: "#f9fafb" }}>
                     <th style={{ padding: "14px", textAlign: "left", fontWeight: "600", color: "#0b1220" }}>ID</th>
-                    <th style={{ padding: "14px", textAlign: "left", fontWeight: "600", color: "#0b1220" }}>{tab === "college" ? "Student Name" : "Passenger Name"}</th>
-                    <th style={{ padding: "14px", textAlign: "left", fontWeight: "600", color: "#0b1220" }}>{tab === "college" ? "Student ID" : "Email/Contact"}</th>
-                    {tab === "passenger" && <th style={{ padding: "14px", textAlign: "left", fontWeight: "600", color: "#0b1220" }}>Pass Type</th>}
+                    <th style={{ padding: "14px", textAlign: "left", fontWeight: "600", color: "#0b1220" }}>
+                      {tab === "college" ? "Student Name" : tab === "passenger" ? "Passenger Name" : "Name"}
+                    </th>
+                    <th style={{ padding: "14px", textAlign: "left", fontWeight: "600", color: "#0b1220" }}>
+                      {tab === "college" ? "Student ID" : tab === "passenger" ? "Email/Contact" : "Type"}
+                    </th>
+                    {(tab === "passenger" || tab === "approved") && <th style={{ padding: "14px", textAlign: "left", fontWeight: "600", color: "#0b1220" }}>Pass Type</th>}
                     <th style={{ padding: "14px", textAlign: "center", fontWeight: "600", color: "#0b1220" }}>Action</th>
                   </tr>
                 </thead>
@@ -408,14 +519,14 @@ export default function AdminDashboard({ onLogout }: Props) {
                     >
                       <td style={{ padding: "14px", color: "#0b1220", fontWeight: "600" }}>{it.id}</td>
                       <td style={{ padding: "14px", color: "#0b1220", fontWeight: "500" }}>
-                        {tab === "college" ? it.studentName : it.passengerName}
+                        {tab === "college" ? it.studentName : tab === "passenger" ? it.passengerName : (it as any).type === "student" ? (it as any).studentName : it.passengerName}
                       </td>
                       <td style={{ padding: "14px", color: "#0b1220", fontFamily: "monospace" }}>
-                        {tab === "college" ? it.studentId : (it as any).email || "N/A"}
+                        {tab === "college" ? it.studentId : tab === "passenger" ? (it as any).email || "N/A" : (it as any).type === "student" ? it.studentId : ((it as any).email || "N/A")}
                       </td>
-                      {tab === "passenger" && (
+                      {(tab === "passenger" || tab === "approved") && (
                         <td style={{ padding: "14px", color: "#0b1220" }}>
-                          {(it.passType || "monthly").toUpperCase()}
+                          {tab === "approved" ? (it as any).type === "student" ? "STUDENT" : (it.passType || "monthly").toUpperCase() : (it.passType || "monthly").toUpperCase()}
                         </td>
                       )}
                       <td style={{ padding: "14px", textAlign: "center" }}>
@@ -511,7 +622,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                         ) : (
                           <div style={{ display: "flex", gap: "8px", flexDirection: "column", alignItems: "center" }}>
                             <button
-                              onClick={() => approve(it.id)}
+                              onClick={() => generatePass(it.id, (it as any).type || "passenger")}
                               disabled={approving === it.id}
                               style={{
                                 padding: "8px 16px",
@@ -1138,6 +1249,296 @@ export default function AdminDashboard({ onLogout }: Props) {
               >
                 ✅ Done
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Modal */}
+      {approveError && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: "#fff",
+            borderRadius: "12px",
+            maxWidth: "500px",
+            width: "90%",
+            boxShadow: "0 20px 25px rgba(0,0,0,0.2)",
+            overflow: "hidden"
+          }}>
+            <div style={{
+              background: "linear-gradient(135deg, #ef4444, #dc2626)",
+              padding: "24px",
+              color: "#fff",
+              textAlign: "center"
+            }}>
+              <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>❌</div>
+              <h2 style={{ margin: "0 0 8px 0", fontSize: "1.5rem" }}>Error</h2>
+              <p style={{ margin: 0, opacity: 0.9 }}>Failed to generate pass</p>
+            </div>
+
+            <div style={{ padding: "24px" }}>
+              <div style={{
+                padding: "16px",
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                borderRadius: "8px",
+                marginBottom: "16px",
+                color: "#991b1b"
+              }}>
+                <p style={{ margin: "0 0 8px 0", fontWeight: "600" }}>
+                  {approveError.message}
+                </p>
+                {approveError.details && (
+                  <p style={{ margin: 0, fontSize: "0.85rem", opacity: 0.8 }}>
+                    ({approveError.details})
+                  </p>
+                )}
+              </div>
+
+              <div style={{
+                padding: "12px",
+                background: "#fef3c7",
+                border: "1px solid #fcd34d",
+                borderRadius: "8px",
+                marginBottom: "16px",
+                color: "#78350f",
+                fontSize: "0.9rem",
+                lineHeight: "1.5"
+              }}>
+                <strong>💡 Troubleshooting:</strong>
+                <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+                  <li>Ensure EM-18 reader is connected to COM5</li>
+                  <li>Place the RFID card within 5-8cm of the reader</li>
+                  <li>Make sure Prisma Studio is closed (uses same port)</li>
+                  <li>Check that blue light appears and beep sounds on card tap</li>
+                </ul>
+              </div>
+
+              <button
+                onClick={() => {
+                  setApproveError(null);
+                  setApproving(null);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  background: "#ef4444",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                  fontSize: "0.95rem",
+                  transition: "all 0.3s ease"
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = "#dc2626";
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(239,68,68,0.3)";
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = "#ef4444";
+                  e.currentTarget.style.transform = "none";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              >
+                🔄 Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Card Modal */}
+      {duplicateCard && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: "#fff",
+            borderRadius: "12px",
+            maxWidth: "500px",
+            width: "90%",
+            boxShadow: "0 20px 25px rgba(0,0,0,0.2)",
+            overflow: "hidden"
+          }}>
+            <div style={{
+              background: "linear-gradient(135deg, #f59e0b, #dc2626)",
+              padding: "24px",
+              color: "#fff",
+              textAlign: "center"
+            }}>
+              <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>⚠️</div>
+              <h2 style={{ margin: "0 0 8px 0", fontSize: "1.5rem" }}>Card Already Has Active Pass</h2>
+              <p style={{ margin: 0, opacity: 0.9 }}>This RFID card is registered with another user</p>
+            </div>
+
+            <div style={{ padding: "24px" }}>
+              <div style={{
+                padding: "16px",
+                background: duplicateCard.isStudent ? "#fef3c7" : "#dbeafe",
+                border: `1px solid ${duplicateCard.isStudent ? "#fcd34d" : "#93c5fd"}`,
+                borderRadius: "8px",
+                marginBottom: "20px",
+                color: duplicateCard.isStudent ? "#78350f" : "#1e40af"
+              }}>
+                <p style={{ margin: "0 0 8px 0", fontWeight: "600" }}>
+                  Current Owner: <strong>{duplicateCard.name}</strong>
+                </p>
+                <p style={{ margin: "0 0 4px 0", fontSize: "0.9rem" }}>
+                  Type: {duplicateCard.type === 'student' ? 'Student Monthly' : (duplicateCard.type || 'Monthly')}
+                </p>
+                <p style={{ margin: "0 0 4px 0", fontSize: "0.9rem" }}>
+                  Expires: {duplicateCard.expiryDate.toLocaleDateString()}
+                </p>
+                <p style={{ margin: "0", fontSize: "0.85rem", opacity: 0.8 }}>
+                  Status: <strong>ACTIVE</strong>
+                </p>
+              </div>
+
+              <div style={{
+                padding: "12px",
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                borderRadius: "8px",
+                marginBottom: "20px",
+                color: "#991b1b",
+                fontSize: "0.9rem"
+              }}>
+                💡 <strong>What will happen?</strong>
+                <p style={{ margin: "6px 0 0 0" }}>
+                  If you continue, the old pass will be replaced with the new one. The previous owner will no longer be able to use this card.
+                </p>
+              </div>
+
+              <div style={{ display: "flex", gap: "12px" }}>
+                <button
+                  onClick={() => {
+                    setDuplicateCard(null);
+                    setApproving(null);
+                    setApproveProgress(0);
+                    setApproveStage("");
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    background: "#6b7280",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    fontWeight: "600",
+                    fontSize: "0.95rem",
+                    transition: "all 0.3s ease"
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.background = "#4b5563";
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.background = "#6b7280";
+                    e.currentTarget.style.transform = "none";
+                  }}
+                >
+                  ❌ Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    // Retry with force=true
+                    setDuplicateCard(null);
+                    const pendingId = (window as any).__pendingPassId;
+                    const pendingType = (window as any).__pendingPassType;
+                    
+                    if (pendingId && pendingType) {
+                      const token = localStorage.getItem("sbp_token");
+                      const endpoint = pendingType === "student"
+                        ? `http://localhost:4000/api/admin/registrations/${pendingId}/approve`
+                        : `http://localhost:4000/api/admin/passenger-registrations/${pendingId}/approve`;
+
+                      fetch(endpoint, {
+                        method: "POST",
+                        headers: { Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ simulate: false, force: true })
+                      })
+                        .then(r => r.json())
+                        .then(json => {
+                          if (json.registration || json.busPass) {
+                            setApproveProgress(100);
+                            setApproveStage("✅ Pass updated successfully!");
+                            setApproveSuccess({
+                              uniquePassId: json.uniquePassId || "N/A",
+                              rfidUid: json.rfidUid || "N/A"
+                            });
+                            
+                            if (pendingType === "student") {
+                              setApprovedStudents((s) => s.filter((it) => it.id !== pendingId));
+                            } else {
+                              setApprovedPassengers((s) => s.filter((it) => it.id !== pendingId));
+                            }
+                          } else {
+                            setApproveError({
+                              message: json.error || "Failed to override pass",
+                              details: json.details
+                            });
+                          }
+                        })
+                        .catch(e => {
+                          setApproveError({
+                            message: "Network error: " + String(e),
+                            details: String(e)
+                          });
+                        })
+                        .finally(() => {
+                          setApproving(null);
+                          setApproveProgress(0);
+                          setApproveStage("");
+                        });
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    background: "#10b981",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    fontWeight: "600",
+                    fontSize: "0.95rem",
+                    transition: "all 0.3s ease"
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.background = "#059669";
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.background = "#10b981";
+                    e.currentTarget.style.transform = "none";
+                  }}
+                >
+                  ✅ Continue - Overwrite
+                </button>
+              </div>
             </div>
           </div>
         </div>

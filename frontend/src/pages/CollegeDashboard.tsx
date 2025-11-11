@@ -17,7 +17,6 @@ export default function CollegeDashboard({ onLogout }: Props) {
   const [items, setItems] = useState<Reg[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [csvLoading, setCsvLoading] = useState(false);
 
   const [form, setForm] = useState({ studentName: "", studentId: "", course: "", collegeId: "1" });
 
@@ -31,9 +30,12 @@ export default function CollegeDashboard({ onLogout }: Props) {
       .then((r) => r.json())
       .then((json) => {
         if (json.items) setItems(json.items);
-        else setError(JSON.stringify(json));
+        else {
+          const errorMsg = json.message || json.error || "Failed to load students";
+          setError(errorMsg);
+        }
       })
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError("Network error: " + String(e)))
       .finally(() => setLoading(false));
   };
 
@@ -57,41 +59,17 @@ export default function CollegeDashboard({ onLogout }: Props) {
           setForm({ studentName: "", studentId: "", course: "", collegeId: form.collegeId });
           load();
         } else {
-          setError(JSON.stringify(json));
+          // Show user-friendly error message
+          const errorMsg = json.message || json.error || "Failed to register student";
+          setError(errorMsg);
         }
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError("Network error: " + String(e)));
   };
 
   const uploadCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    setCsvLoading(true);
-    setError(null);
-    const token = localStorage.getItem("sbp_token");
-    const formData = new FormData();
-    formData.append("file", file);
-
-    fetch("http://localhost:4000/api/college/students/bulk", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    })
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.total !== undefined) {
-          alert(`CSV uploaded: ${json.created} created, ${json.failed} failed`);
-          load();
-        } else {
-          setError("CSV upload failed: " + JSON.stringify(json));
-        }
-      })
-      .catch((e) => setError("CSV upload error: " + String(e)))
-      .finally(() => {
-        setCsvLoading(false);
-        e.target.value = "";
-      });
+    // Bulk upload feature has been removed
+    console.warn("Bulk upload feature is no longer available. Please use manual entry.");
   };
 
   const pendingCount = items.filter(it => it.status === "pending").length;
@@ -175,58 +153,31 @@ export default function CollegeDashboard({ onLogout }: Props) {
           padding: "16px",
           borderRadius: "8px",
           marginBottom: "20px",
-          border: "1px solid #fca5a5"
+          border: "1px solid #fca5a5",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
         }}>
-          ⚠️ {error}
+          <span>⚠️ {error}</span>
+          <button
+            onClick={() => setError(null)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#991b1b",
+              fontSize: "1.2rem",
+              cursor: "pointer",
+              padding: "0",
+              lineHeight: "1"
+            }}
+          >
+            ✕
+          </button>
         </div>
       )}
 
       {/* Two Column Layout */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px", marginBottom: "32px" }}>
-        {/* Bulk Upload Card */}
-        <div style={{
-          background: "#fff",
-          padding: "24px",
-          borderRadius: "12px",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
-          border: "1px solid rgba(0,0,0,0.05)"
-        }}>
-          <h3 style={{ margin: "0 0 16px 0", fontSize: "1.15rem", color: "#0b1220" }}>📤 Bulk Upload</h3>
-          <p style={{ margin: "0 0 16px 0", color: "#6b7280", fontSize: "0.9rem" }}>
-            Upload a CSV file with student data. Expected columns: <code style={{ background: "#f3f4f6", padding: "2px 6px", borderRadius: "4px" }}>studentName, studentId, course</code>
-          </p>
-          <label style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "32px",
-            border: "2px dashed #3b82f6",
-            borderRadius: "10px",
-            background: "#eff6ff",
-            cursor: "pointer",
-            transition: "all 0.3s ease",
-            position: "relative"
-          }}
-            onMouseOver={(e) => (e.currentTarget.style.background = "#dbeafe")}
-            onMouseOut={(e) => (e.currentTarget.style.background = "#eff6ff")}
-          >
-            <input
-              type="file"
-              accept=".csv"
-              onChange={uploadCSV}
-              disabled={csvLoading}
-              style={{ display: "none" }}
-            />
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: "2.5rem", marginBottom: "8px" }}>📄</div>
-              <div style={{ fontWeight: "600", color: "#1e40af" }}>
-                {csvLoading ? "Uploading..." : "Drop CSV or click to browse"}
-              </div>
-              <div style={{ fontSize: "0.85rem", color: "#6b7280", marginTop: "4px" }}>Max file size: 5MB</div>
-            </div>
-          </label>
-        </div>
-
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "24px", marginBottom: "32px" }}>
         {/* Manual Registration Card */}
         <div style={{
           background: "#fff",
@@ -235,8 +186,8 @@ export default function CollegeDashboard({ onLogout }: Props) {
           boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
           border: "1px solid rgba(0,0,0,0.05)"
         }}>
-          <h3 style={{ margin: "0 0 16px 0", fontSize: "1.15rem", color: "#0b1220" }}>👤 Manual Entry</h3>
-          <p style={{ margin: "0 0 16px 0", color: "#6b7280", fontSize: "0.9rem" }}>Register a single student</p>
+          <h3 style={{ margin: "0 0 16px 0", fontSize: "1.15rem", color: "#0b1220" }}>� Register Student</h3>
+          <p style={{ margin: "0 0 16px 0", color: "#6b7280", fontSize: "0.9rem" }}>Add a new student registration for bus pass approval</p>
           <form onSubmit={submit}>
             <label style={{ display: "block", marginBottom: "12px" }}>
               <span style={{ display: "block", fontSize: "0.85rem", fontWeight: "600", color: "#0b1220", marginBottom: "6px" }}>Student Name *</span>

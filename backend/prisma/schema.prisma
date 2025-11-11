@@ -53,7 +53,7 @@ model PassengerRegistration {
 model StudentRegistration {
   id         Int      @id @default(autoincrement())
   studentName String
-  studentId   String
+  studentId   String   @unique
   course      String?
   collegeId   Int
   status      String   @default("pending")
