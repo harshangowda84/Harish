@@ -1,8 +1,33 @@
 import { Router } from 'express';
 import { prisma } from '../db';
 import { generateUniquePassId, prepareRFIDPayload, writeToRFIDCard } from '../utils/rfid';
+import { getNow } from '../utils/dateOverride';
+import path from 'path';
 
 const router = Router();
+
+// Helper function to extract filename from full path
+const extractFilename = (filePath: string | null): string | null => {
+  if (!filePath) return null;
+  // If it contains backslashes or forward slashes, extract just the filename
+  if (filePath.includes('\\') || filePath.includes('/')) {
+    return path.basename(filePath);
+  }
+  return filePath;
+};
+
+// Helper to clean document paths array
+const cleanDocumentPaths = (documents: string | null): string => {
+  if (!documents) return '[]';
+  try {
+    const parsed = JSON.parse(documents);
+    if (Array.isArray(parsed)) {
+      const cleaned = parsed.map(doc => extractFilename(doc) || doc);
+      return JSON.stringify(cleaned);
+    }
+  } catch {}
+  return documents;
+};
 
 // GET /api/admin/registrations?status=pending&type=student|passenger
 router.get('/registrations', async (req, res) => {
@@ -12,10 +37,21 @@ router.get('/registrations', async (req, res) => {
   try {
     if (type === 'passenger') {
       const items = await prisma.passengerRegistration.findMany({ where: { status } });
-      return res.json({ items, type: 'passenger' });
+      // Clean up file paths before sending
+      const cleanedItems = items.map(item => ({
+        ...item,
+        documents: cleanDocumentPaths(item.documents),
+        photoPath: extractFilename(item.photoPath)
+      }));
+      return res.json({ items: cleanedItems, type: 'passenger' });
     } else {
       const items = await prisma.studentRegistration.findMany({ where: { status } });
-      return res.json({ items, type: 'student' });
+      // Clean up photo paths
+      const cleanedItems = items.map(item => ({
+        ...item,
+        photoPath: extractFilename(item.photoPath)
+      }));
+      return res.json({ items: cleanedItems, type: 'student' });
     }
   } catch (err) {
     console.error(err);
@@ -231,8 +267,19 @@ router.post('/passenger-registrations/:id/approve', async (req, res) => {
 
     // Generate unique pass ID and write to RFID
     const uniquePassId = generateUniquePassId();
+    
+    // Calculate expiry based on pass type
     const passValidity = new Date();
-    passValidity.setFullYear(passValidity.getFullYear() + 1);
+    if (reg.passType === 'day') {
+      passValidity.setHours(passValidity.getHours() + 24);
+    } else if (reg.passType === 'weekly') {
+      passValidity.setDate(passValidity.getDate() + 7);
+    } else if (reg.passType === 'monthly') {
+      passValidity.setDate(passValidity.getDate() + 30);
+    } else {
+      // Default to 1 year for any other type
+      passValidity.setFullYear(passValidity.getFullYear() + 1);
+    }
 
     const payload = prepareRFIDPayload({
       uniquePassId,
@@ -243,10 +290,10 @@ router.post('/passenger-registrations/:id/approve', async (req, res) => {
       phoneNumber: (reg as any).phoneNumber || '',
     });
 
-    // Write to RFID card
+    // Write to RFID card (REQUIRED - admin must tap card during approval)
     const rfidUid = await writeToRFIDCard(payload, 'COM5', simulate);
 
-    // Check if this card already has a valid pass (unless force=true)
+    // Check if this card already has a valid pass (only if we got a UID)
     if (!force && rfidUid) {
       const existingStudent = await prisma.studentRegistration.findFirst({
         where: { rfidUid }
@@ -360,10 +407,22 @@ router.get('/approved-passes', async (req, res) => {
       })
     ]);
 
+    // Clean file paths
+    const cleanedStudents = approvedStudents.map(item => ({
+      ...item,
+      photoPath: extractFilename(item.photoPath)
+    }));
+    
+    const cleanedPassengers = approvedPassengers.map(item => ({
+      ...item,
+      documents: cleanDocumentPaths(item.documents),
+      photoPath: extractFilename(item.photoPath)
+    }));
+
     res.json({
-      students: approvedStudents,
-      passengers: approvedPassengers,
-      total: approvedStudents.length + approvedPassengers.length
+      students: cleanedStudents,
+      passengers: cleanedPassengers,
+      total: cleanedStudents.length + cleanedPassengers.length
     });
   } catch (err) {
     console.error(err);
@@ -427,30 +486,32 @@ router.get('/check-card/:rfidUid', async (req, res) => {
     const studentValid = studentPass && studentPass.passValidity && studentPass.passValidity > now;
     const passengerValid = passengerPass && passengerPass.passValidity && passengerPass.passValidity > now;
 
-    if (studentValid) {
+    if (studentPass) {
+      // Return student pass info even if expired
       return res.json({
-        hasValidPass: true,
+        hasValidPass: studentValid,
         isStudent: true,
         existingPass: {
           name: (studentPass as any).studentName,
           type: 'student_monthly',
           expiryDate: studentPass.passValidity,
           id: studentPass.id,
-          status: 'active'
+          status: studentValid ? 'active' : 'expired'
         }
       });
     }
 
-    if (passengerValid) {
+    if (passengerPass) {
+      // Return passenger pass info even if expired
       return res.json({
-        hasValidPass: true,
+        hasValidPass: passengerValid,
         isStudent: false,
         existingPass: {
           name: (passengerPass as any).passengerName,
           type: (passengerPass as any).passType || 'daily',
           expiryDate: passengerPass.passValidity,
           id: passengerPass.id,
-          status: 'active'
+          status: passengerValid ? 'active' : 'expired'
         }
       });
     }
@@ -459,6 +520,54 @@ router.get('/check-card/:rfidUid', async (req, res) => {
   } catch (err) {
     console.error('Error checking card validity:', err);
     res.status(500).json({ error: 'Failed to check card validity' });
+  }
+});
+
+/**
+ * POST /api/admin/erase-card/student/:id
+ * Erase RFID UID from student pass (allows card reassignment)
+ */
+router.post('/erase-card/student/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    
+    const updated = await prisma.studentRegistration.update({
+      where: { id },
+      data: { rfidUid: null }
+    });
+
+    return res.json({
+      success: true,
+      message: '✅ Student card erased successfully',
+      updatedPass: updated
+    });
+  } catch (err) {
+    console.error('Error erasing student card:', err);
+    res.status(500).json({ error: 'Failed to erase student card' });
+  }
+});
+
+/**
+ * POST /api/admin/erase-card/passenger/:id
+ * Erase RFID UID from passenger pass (allows card reassignment)
+ */
+router.post('/erase-card/passenger/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    
+    const updated = await prisma.passengerRegistration.update({
+      where: { id },
+      data: { rfidUid: null }
+    });
+
+    return res.json({
+      success: true,
+      message: '✅ Passenger card erased successfully',
+      updatedPass: updated
+    });
+  } catch (err) {
+    console.error('Error erasing passenger card:', err);
+    res.status(500).json({ error: 'Failed to erase passenger card' });
   }
 });
 

@@ -1,0 +1,210 @@
+# 🧪 MANUAL DATE TESTING GUIDE FOR PASS EXPIRY
+
+## 📍 WHERE TO EDIT THE DATE
+
+**File:** `backend/src/utils/dateOverride.ts` (Line ~13)
+
+Open this file in VS Code and edit the `TEST_OVERRIDE_DATE` variable.
+
+---
+
+## 🎯 TESTING SCENARIOS
+
+### **SCENARIO 1: Test DAY PASS (24-hour expiry)**
+
+**Step 1:** Open `backend/src/utils/dateOverride.ts`
+
+**Step 2:** Find this section and uncomment Option 2:
+```typescript
+// ❌ Option 2: Test TOMORROW (Day pass expires, Weekly/Monthly valid)
+const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 24 * 60 * 60 * 1000);
+```
+
+Make sure the other options are commented out:
+```typescript
+const TEST_OVERRIDE_DATE: Date | null = null;  // ← Line 13 - Keep this commented
+
+// ✅ Option 1: Test TODAY (all passes valid)
+// const TEST_OVERRIDE_DATE = new Date();
+
+// ❌ Option 2: Test TOMORROW (Day pass expires, Weekly/Monthly valid)
+const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 24 * 60 * 60 * 1000);  // ← UNCOMMENTED
+
+// ❌ Option 3: Test 8 DAYS LATER (Day + Weekly expire, Monthly valid)
+// const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 8 * 24 * 60 * 60 * 1000);
+```
+
+**Step 3:** Save the file (backend auto-restarts)
+
+**Step 4:** Go to Conductor Panel and scan the card → **You'll see: "❌ Pass has expired"**
+
+---
+
+### **SCENARIO 2: Test WEEKLY PASS (7-day expiry)**
+
+**Step 1:** Open `backend/src/utils/dateOverride.ts`
+
+**Step 2:** Uncomment Option 3:
+```typescript
+// ❌ Option 3: Test 8 DAYS LATER (Day + Weekly expire, Monthly valid)
+const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 8 * 24 * 60 * 60 * 1000);
+```
+
+**Step 3:** Save file → Backend restarts
+
+**Step 4:** Scan card in Conductor Panel → **You'll see: "❌ Pass has expired"**
+
+---
+
+### **SCENARIO 3: Test MONTHLY PASS (30-day expiry)**
+
+**Step 1:** Open `backend/src/utils/dateOverride.ts`
+
+**Step 2:** Uncomment Option 4:
+```typescript
+// ❌ Option 4: Test 31 DAYS LATER (All 3 expire)
+const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 31 * 24 * 60 * 60 * 1000);
+```
+
+**Step 3:** Save file → Backend restarts
+
+**Step 4:** Scan card in Conductor Panel → **You'll see: "❌ Pass has expired"**
+
+---
+
+### **SCENARIO 4: Test YEARLY PASS (365-day expiry)**
+
+**Step 1:** Open `backend/src/utils/dateOverride.ts`
+
+**Step 2:** Uncomment Option 5:
+```typescript
+// ✅ Option 5: Test 365 DAYS LATER (Only yearly passes valid)
+const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 365 * 24 * 60 * 60 * 1000);
+```
+
+**Step 3:** Save file → Backend restarts
+
+**Step 4:** Scan card in Conductor Panel → **You'll see: "✅ Valid yearly pass"**
+
+---
+
+### **SCENARIO 5: Reset to NORMAL (Use actual date)**
+
+**Step 1:** Open `backend/src/utils/dateOverride.ts`
+
+**Step 2:** Comment out all options, keep line 13 as null:
+```typescript
+const TEST_OVERRIDE_DATE: Date | null = null;  // ← All passes show ACTUAL expiry
+
+// ✅ Option 1: Test TODAY (all passes valid)
+// const TEST_OVERRIDE_DATE = new Date();
+
+// ❌ Option 2: Test TOMORROW (Day pass expires, Weekly/Monthly valid)
+// const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 24 * 60 * 60 * 1000);
+
+// ... (rest commented out)
+```
+
+**Step 3:** Save file → Backend uses real system date
+
+---
+
+## 📊 PASS VALIDITY CHART
+
+| Pass Type | Duration | Scenario | Date Override | Expected Result |
+|-----------|----------|----------|---|---|
+| **DAY** | 24 hours | Tomorrow | Option 2 (+1 day) | ❌ Expired |
+| **WEEKLY** | 7 days | 8 days later | Option 3 (+8 days) | ❌ Expired |
+| **MONTHLY** | 30 days | 31 days later | Option 4 (+31 days) | ❌ Expired |
+| **YEARLY** | 365 days | 365 days later | Option 5 (+365 days) | ✅ Valid |
+| **ANY** | - | Today | null | ✅ Valid |
+
+---
+
+## 🔄 HOW TO USE
+
+### Quick workflow:
+
+1. **Register a passenger with DAY PASS**
+   - Go to http://localhost:5173
+   - Passenger Login → Select "Day Pass" → Register
+
+2. **Admin approves it**
+   - Admin Login → Approve → Tap card
+
+3. **Set date to tomorrow**
+   - Open `backend/src/utils/dateOverride.ts`
+   - Uncomment Option 2
+   - Save (backend auto-restarts)
+
+4. **Test in Conductor Panel**
+   - Go to app → Conductor Panel
+   - Scan the same card
+   - See: "❌ Pass has expired"
+
+5. **Reset to normal**
+   - Comment out Option 2 again
+   - Save
+   - Backend back to real date
+
+---
+
+## 📋 BACKEND LOG MESSAGES
+
+When you save the file, watch the terminal for:
+
+```
+[INFO] 18:30:45 Restarting: D:\Project\Harish\backend\src\utils\dateOverride.ts has been modified
+Backend running on http://localhost:4000
+🧪 TEST MODE: Using date [Your Custom Date]
+```
+
+This confirms the date override is active!
+
+---
+
+## ⚡ QUICK COPY-PASTE OPTIONS
+
+**For DAY PASS test:**
+```typescript
+const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 24 * 60 * 60 * 1000);
+```
+
+**For WEEKLY PASS test:**
+```typescript
+const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 8 * 24 * 60 * 60 * 1000);
+```
+
+**For MONTHLY PASS test:**
+```typescript
+const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 31 * 24 * 60 * 60 * 1000);
+```
+
+**For YEARLY PASS test:**
+```typescript
+const TEST_OVERRIDE_DATE = new Date(new Date().getTime() + 365 * 24 * 60 * 60 * 1000);
+```
+
+**To reset (remove override):**
+```typescript
+const TEST_OVERRIDE_DATE: Date | null = null;
+```
+
+---
+
+## ✅ TESTING CHECKLIST
+
+- [ ] Create Day Pass with unique name
+- [ ] Admin approves it (tap card)
+- [ ] Set date to tomorrow (Option 2)
+- [ ] Scan card → Shows "expired"
+- [ ] Reset date to normal
+- [ ] Create Weekly Pass with unique name
+- [ ] Admin approves it
+- [ ] Set date to +8 days (Option 3)
+- [ ] Scan card → Shows "expired"
+- [ ] Reset and repeat for Monthly Pass
+
+---
+
+**That's it! Edit the date in `dateOverride.ts`, save, and test! 🎉**

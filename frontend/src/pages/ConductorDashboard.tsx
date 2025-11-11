@@ -1,27 +1,44 @@
 import React, { useState } from "react";
 
+// Helper function to format date as DD-MM-YYYY
+const formatDate = (dateString: string | null | undefined): string => {
+  if (!dateString) return "N/A";
+  const date = new Date(dateString);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
 type Props = {
   onLogout?: () => void;
 };
 
 interface PassInfo {
   valid: boolean;
+  id?: number;
+  type?: "student" | "passenger";
   passengerName?: string;
   passType?: string;
   passNumber?: string;
   validUntil?: string;
   status?: string;
   message?: string;
+  photoPath?: string | null;
+  renewed?: boolean;
+  rfidUid?: string;
 }
 
 export default function ConductorDashboard({ onLogout }: Props) {
   const [scanning, setScanning] = useState(false);
   const [passInfo, setPassInfo] = useState<PassInfo | null>(null);
   const [lastScanTime, setLastScanTime] = useState<string>("");
+  const [showRenewing, setShowRenewing] = useState(false);
 
   const scanCard = async () => {
     setScanning(true);
     setPassInfo(null);
+    setShowRenewing(false);
 
     try {
       const response = await fetch("http://localhost:4000/api/conductor/scan-card", {
@@ -32,6 +49,26 @@ export default function ConductorDashboard({ onLogout }: Props) {
       const data = await response.json();
       setPassInfo(data);
       setLastScanTime(new Date().toLocaleTimeString());
+
+      // If pass was renewed, show renewing status for 1 second
+      if (data.renewed && data.status === "renewing") {
+        setShowRenewing(true);
+        setTimeout(() => {
+          setShowRenewing(false);
+          // Update status to active
+          setPassInfo(prev => prev ? { ...prev, status: "active" } : null);
+        }, 1000);
+      }
+
+      // If pass was just activated, show activation status for 1 second
+      if (data.activated && data.status === "activated") {
+        setShowRenewing(true);
+        setTimeout(() => {
+          setShowRenewing(false);
+          // Update status to active
+          setPassInfo(prev => prev ? { ...prev, status: "active" } : null);
+        }, 1000);
+      }
     } catch (error) {
       setPassInfo({
         valid: false,
@@ -163,6 +200,50 @@ export default function ConductorDashboard({ onLogout }: Props) {
             borderTop: `4px solid ${passInfo.valid ? "#10b981" : "#ef4444"}`,
             animation: "slideIn 0.4s ease"
           }}>
+            {/* Special Renewing Status */}
+            {showRenewing && passInfo.status === "renewing" && (
+              <div style={{
+                background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
+                color: "#fff",
+                padding: "20px",
+                borderRadius: "12px",
+                marginBottom: "20px",
+                textAlign: "center",
+                animation: "pulse 0.8s ease-in-out 3",
+                boxShadow: "0 8px 24px rgba(59, 130, 246, 0.4)"
+              }}>
+                <div style={{ fontSize: "2.5rem", marginBottom: "8px" }}>🔄</div>
+                <h3 style={{ margin: "0 0 4px 0", fontSize: "1.3rem", fontWeight: "700" }}>
+                  Pass Renewing...
+                </h3>
+                <p style={{ margin: 0, fontSize: "0.9rem", opacity: 0.9 }}>
+                  Please wait while we activate your renewed pass
+                </p>
+              </div>
+            )}
+
+            {/* Special Activation Status */}
+            {showRenewing && passInfo.status === "activated" && (
+              <div style={{
+                background: "linear-gradient(135deg, #10b981, #059669)",
+                color: "#fff",
+                padding: "20px",
+                borderRadius: "12px",
+                marginBottom: "20px",
+                textAlign: "center",
+                animation: "pulse 0.8s ease-in-out 3",
+                boxShadow: "0 8px 24px rgba(16, 185, 129, 0.4)"
+              }}>
+                <div style={{ fontSize: "2.5rem", marginBottom: "8px" }}>✅</div>
+                <h3 style={{ margin: "0 0 4px 0", fontSize: "1.3rem", fontWeight: "700" }}>
+                  Pass Activated!
+                </h3>
+                <p style={{ margin: 0, fontSize: "0.9rem", opacity: 0.9 }}>
+                  Your pass is now active and ready to use
+                </p>
+              </div>
+            )}
+
             <div style={{
               display: "flex",
               alignItems: "center",
@@ -202,49 +283,101 @@ export default function ConductorDashboard({ onLogout }: Props) {
               </div>
             </div>
 
-            {passInfo.valid && (
-              <div style={{
-                background: "#fff",
-                borderRadius: "12px",
-                padding: "30px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.08)"
-              }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "4px", fontWeight: "600" }}>
-                      Passenger Name
-                    </div>
-                    <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#1f2937" }}>
-                      {passInfo.passengerName || "N/A"}
-                    </div>
+            {/* Pass Details - Show for both valid and expired passes */}
+            <div style={{
+              background: "#fff",
+              borderRadius: "12px",
+              padding: "30px",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.08)"
+            }}>
+              {/* Photo Display */}
+              {passInfo.photoPath && (
+                <div style={{
+                  marginBottom: "30px",
+                  textAlign: "center"
+                }}>
+                  <div style={{
+                    width: "150px",
+                    height: "150px",
+                    margin: "0 auto",
+                    borderRadius: "50%",
+                    overflow: "hidden",
+                    border: `4px solid ${passInfo.valid ? "#10b981" : "#ef4444"}`,
+                    boxShadow: `0 8px 20px ${passInfo.valid ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"}`
+                  }}>
+                    <img
+                      src={`http://localhost:4000/uploads/${passInfo.photoPath}`}
+                      alt="Passenger Photo"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover"
+                      }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                      }}
+                    />
                   </div>
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "4px", fontWeight: "600" }}>
-                      Pass Type
-                    </div>
-                    <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#1f2937" }}>
-                      {passInfo.passType || "N/A"}
-                    </div>
+                  <div style={{
+                    marginTop: "12px",
+                    fontSize: "0.9rem",
+                    color: "#6b7280",
+                    fontWeight: "600"
+                  }}>
+                    📸 {passInfo.type === "student" ? "Student" : "Passenger"} Photo
                   </div>
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "4px", fontWeight: "600" }}>
-                      Pass Number
-                    </div>
-                    <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#1f2937" }}>
-                      {passInfo.passNumber || "N/A"}
-                    </div>
+                </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "30px" }}>
+                <div>
+                  <div style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "4px", fontWeight: "600" }}>
+                    Passenger Name
                   </div>
-                  <div>
-                    <div style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "4px", fontWeight: "600" }}>
-                      Valid Until
-                    </div>
-                    <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#1f2937" }}>
-                      {passInfo.validUntil ? new Date(passInfo.validUntil).toLocaleDateString() : "N/A"}
-                    </div>
+                  <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#1f2937" }}>
+                    {passInfo.passengerName || "N/A"}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "4px", fontWeight: "600" }}>
+                    Pass Type
+                  </div>
+                  <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#1f2937" }}>
+                    {passInfo.passType || "N/A"}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "4px", fontWeight: "600" }}>
+                    Pass Number
+                  </div>
+                  <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#1f2937" }}>
+                    {passInfo.passNumber || "N/A"}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "4px", fontWeight: "600" }}>
+                    Card Number (UID)
+                  </div>
+                  <div style={{ 
+                    fontSize: "1.1rem", 
+                    fontWeight: "700", 
+                    color: "#1f2937",
+                    fontFamily: "monospace",
+                    letterSpacing: "0.5px"
+                  }}>
+                    {passInfo.rfidUid || "N/A"}
+                  </div>
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <div style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "4px", fontWeight: "600" }}>
+                    Valid Until
+                  </div>
+                  <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#1f2937" }}>
+                    {formatDate(passInfo.validUntil)}
                   </div>
                 </div>
               </div>
-            )}
+            </div>
 
             {lastScanTime && (
               <div style={{

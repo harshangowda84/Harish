@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { prisma } from '../db';
 import { AuthRequest } from '../middleware/auth';
+import { uploadMultiple } from '../middleware/upload';
 
 const router = Router();
 
 // POST /api/college/students — create a pending registration
-router.post('/students', async (req, res) => {
+router.post('/students', uploadMultiple, async (req, res) => {
   const { studentName, studentId, course, collegeId, uploadedBy } = req.body;
   if (!studentName || !studentId || !collegeId) return res.status(400).json({ error: 'missing_fields' });
 
@@ -23,6 +24,14 @@ router.post('/students', async (req, res) => {
       });
     }
 
+    // Handle photo file upload if provided
+    let photoPath: string | null = null;
+    const files = (req as any).files;
+    if (files && files.photo && Array.isArray(files.photo) && files.photo.length > 0) {
+      photoPath = files.photo[0].filename;
+      console.log("Student photo uploaded:", photoPath);
+    }
+
     const reg = await prisma.studentRegistration.create({
       data: {
         studentName,
@@ -30,6 +39,8 @@ router.post('/students', async (req, res) => {
         course: course || null,
         collegeId: Number(collegeId),
         status: 'pending',
+        photoPath: photoPath,
+        photoVerified: false
       },
     });
 

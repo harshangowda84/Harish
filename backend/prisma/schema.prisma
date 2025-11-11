@@ -41,10 +41,16 @@ model PassengerRegistration {
   declineReason   String?  // Reason if declined
   documents       String?  // JSON string of document paths
   
+  // Photo verification
+  photoPath       String?  // Path to uploaded photo
+  photoVerified   Boolean  @default(false)  // Admin verified the photo
+  
   // RFID and Pass Info
   uniquePassId    String?  @unique  // Unique ID for passenger login
   rfidUid         String?  @unique  // RFID card UID
   passValidity    DateTime?         // When pass expires
+  renewalRequested Boolean  @default(false)  // User requested renewal
+  renewalStartDate DateTime?         // Date when renewal should start (for user-selected renewal date)
   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -58,10 +64,16 @@ model StudentRegistration {
   collegeId   Int
   status      String   @default("pending")
   
+  // Photo verification
+  photoPath       String?  // Path to uploaded photo
+  photoVerified   Boolean  @default(false)  // Admin verified the photo
+  
   // RFID and Pass Info
   uniquePassId String?  @unique  // Unique ID for student login
   rfidUid      String?  @unique  // RFID card UID
   passValidity DateTime?         // When pass expires
+  renewalRequested Boolean  @default(false)  // User requested renewal
+  renewalStartDate DateTime?     // Date when renewal should start (for user-selected renewal date)
   
   createdAt   DateTime @default(now())
 }

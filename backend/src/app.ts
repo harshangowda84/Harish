@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
 import authRoutes from "./routes/auth";
 import registrationRoutes from "./routes/registration";
 import adminRoutes from "./routes/admin";
@@ -12,6 +13,9 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Serve uploaded files statically
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 app.get("/", (req, res) => res.json({ ok: true, version: "backend-starter" }));
 

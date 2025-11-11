@@ -1,0 +1,151 @@
+#!/bin/bash
+# 🧪 Manual Date/Time Testing Guide for Day Pass Expiry
+
+## STEP 1: Set Test Date to Tomorrow
+# This API endpoint allows you to override the system date for testing
+
+### Using PowerShell:
+```powershell
+# Set date to tomorrow at 6 PM
+$tomorrow = (Get-Date).AddDays(1).ToString("yyyy-MM-ddT18:00:00Z")
+$body = @{ date = $tomorrow } | ConvertTo-Json
+
+Invoke-WebRequest -Uri "http://localhost:4000/api/conductor/set-test-date" `
+  -Method POST `
+  -Body $body `
+  -ContentType "application/json"
+
+# This will show:
+# "⏰ Test date set successfully"
+```
+
+### Using cURL (Git Bash / Linux):
+```bash
+# Set date to tomorrow at 6 PM
+curl -X POST http://localhost:4000/api/conductor/set-test-date \
+  -H "Content-Type: application/json" \
+  -d '{"date":"2025-11-13T18:00:00Z"}'
+
+# Response:
+# {
+#   "success": true,
+#   "message": "⏰ Test date set successfully",
+#   "overrideDate": "11/13/2025, 6:00:00 PM"
+# }
+```
+
+## STEP 2: Create a Day Pass Registration
+1. Go to http://localhost:5173
+2. Click "Passenger Login"
+3. Email: `passenger@smartbus.local` / Password: `password`
+4. Select **"Day Pass"** (🌅)
+5. Fill form with unique name (e.g., "TestDayPass" + today's date)
+6. Submit
+
+## STEP 3: Admin Approves the Pass
+1. Go to Admin Login: `admin@smartbus.local` / `password`
+2. Go to **Passengers** tab
+3. Find your registration
+4. Click **View Details** → **Approve**
+5. Tap RFID card (or simulate)
+6. ✅ Pass approved with 24-hour validity
+
+**At this point:**
+- Approval time: 6:00 PM (approx)
+- **Day Pass expires: Tomorrow 6:00 PM**
+
+## STEP 4: Test with System Date Set to Tomorrow
+1. Backend already running
+2. Set date to tomorrow at 6:30 PM using PowerShell:
+
+```powershell
+$tomorrow = (Get-Date).AddDays(1).ToString("yyyy-MM-ddT18:30:00Z")
+$body = @{ date = $tomorrow } | ConvertTo-Json
+
+Invoke-WebRequest -Uri "http://localhost:4000/api/conductor/set-test-date" `
+  -Method POST `
+  -Body $body `
+  -ContentType "application/json"
+```
+
+3. Go to **Conductor Panel** (same app)
+4. Click **"Scan Card"** button
+5. Tap the SAME RFID card
+6. **You should see: ❌ Pass has expired**
+
+## STEP 5: Test with Time Still Valid
+```powershell
+# Set to tomorrow at 5:30 PM (30 min before expiry)
+$tomorrow = (Get-Date).AddDays(1).ToString("yyyy-MM-ddT17:30:00Z")
+$body = @{ date = $tomorrow } | ConvertTo-Json
+
+Invoke-WebRequest -Uri "http://localhost:4000/api/conductor/set-test-date" `
+  -Method POST `
+  -Body $body `
+  -ContentType "application/json"
+```
+
+3. Go to Conductor Panel
+4. Tap card again
+5. **You should see: ✅ Valid day pass (30m remaining)**
+
+## STEP 6: Reset to System Date
+```powershell
+$body = @{ date = $null } | ConvertTo-Json
+
+Invoke-WebRequest -Uri "http://localhost:4000/api/conductor/set-test-date" `
+  -Method POST `
+  -Body $body `
+  -ContentType "application/json"
+
+# Response: "✅ Date reset to system date"
+```
+
+## 📊 Expected Results
+
+| Time | Day Pass Status | Message |
+|------|---------|---------|
+| **Now** | ✅ Valid | "Valid day pass (24h remaining)" |
+| **Tomorrow 5:30 PM** | ✅ Valid | "Valid day pass (30m remaining)" |
+| **Tomorrow 6:00 PM** | ❌ Expired | "Pass has expired" |
+| **Day after** | ❌ Expired | "Pass has expired" |
+
+## 🔄 Quick PowerShell Commands
+
+Save this as `test-dates.ps1`:
+
+```powershell
+# Function to set test date
+function Set-TestDate {
+    param([string]$dateString)
+    
+    $body = @{ date = if ($dateString -eq "reset") { $null } else { $dateString } } | ConvertTo-Json
+    
+    $response = Invoke-WebRequest -Uri "http://localhost:4000/api/conductor/set-test-date" `
+        -Method POST `
+        -Body $body `
+        -ContentType "application/json"
+    
+    $response.Content | ConvertFrom-Json | Format-Table
+}
+
+# Examples:
+# Set-TestDate "2025-11-13T17:30:00Z"  # Tomorrow 5:30 PM
+# Set-TestDate "2025-11-13T18:00:00Z"  # Tomorrow 6:00 PM (exact expiry)
+# Set-TestDate "2025-11-13T18:30:00Z"  # Tomorrow 6:30 PM (after expiry)
+# Set-TestDate "reset"                  # Reset to system date
+```
+
+## ✨ Summary
+
+Now you can:
+1. ✅ Create a day pass
+2. ✅ Manually set system date to test expiry logic
+3. ✅ See conductor panel show "Pass expired" after 24 hours
+4. ✅ Verify remaining time calculation works correctly
+5. ✅ Test all pass types (day/weekly/monthly)
+
+The date override utility respects your test date for:
+- Duplicate card checking
+- Pass validity checking in conductor panel
+- Time remaining calculations

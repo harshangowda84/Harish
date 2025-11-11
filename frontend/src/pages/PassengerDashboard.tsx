@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from "react";
 
+// Helper function to format date as DD-MM-YYYY
+const formatDate = (dateString: string | null | undefined): string => {
+  if (!dateString) return "N/A";
+  const date = new Date(dateString);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
 type Props = {
   onLogout: () => void;
 };
@@ -23,6 +33,7 @@ type PassengerRegistration = {
   uniquePassId?: string;
   rfidUid?: string;
   passValidity?: string;
+  renewalRequested?: boolean;
 };
 
 export default function PassengerDashboard({ onLogout }: Props) {
@@ -40,12 +51,27 @@ export default function PassengerDashboard({ onLogout }: Props) {
     idNumber: ""
   });
   const [documents, setDocuments] = useState<File[]>([]);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [renewing, setRenewing] = useState<number | null>(null);
+  
+  // Real-time status update state
+  const [lastUpdate, setLastUpdate] = useState(new Date());
 
   // Fetch previous applications on component mount
   useEffect(() => {
     fetchApplications();
+  }, []);
+  
+  // Auto-refresh status every 30 seconds for real-time updates
+  useEffect(() => {
+    const refreshInterval = setInterval(() => {
+      setLastUpdate(new Date());
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(refreshInterval);
   }, []);
 
   const fetchApplications = async () => {
@@ -64,6 +90,33 @@ export default function PassengerDashboard({ onLogout }: Props) {
       console.error("Error fetching applications:", err);
     } finally {
       setLoadingApplications(false);
+    }
+  };
+
+  const renewPass = async (id: number) => {
+    setRenewing(id);
+    try {
+      const response = await fetch(`http://localhost:4000/api/passenger/renew/${id}`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${localStorage.getItem("sbp_token")}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.ok) {
+        alert("✅ " + data.message);
+        // Refresh applications to show updated status
+        fetchApplications();
+      } else {
+        alert("❌ Error: " + (data.error || "Failed to renew pass"));
+      }
+    } catch (err) {
+      alert("❌ Error renewing pass: " + String(err));
+    } finally {
+      setRenewing(null);
     }
   };
 
@@ -110,14 +163,58 @@ export default function PassengerDashboard({ onLogout }: Props) {
   const validateForm = () => {
     if (!formData.passengerName.trim()) return "Name is required";
     if (!/^[a-zA-Z\s]+$/.test(formData.passengerName)) return "Name can only contain alphabets and spaces";
-    if (!formData.age || parseInt(formData.age) < 5 || parseInt(formData.age) > 120) return "Age must be between 5 and 120";
+    if (!formData.age || parseInt(formData.age) < 5 || parseInt(formData.age) > 200) return "Age must be between 5 and 200 years";
     if (!/^\d+$/.test(formData.age)) return "Age can only contain digits";
+    if (formData.age.length > 3) return "Age cannot exceed 3 digits (max 200)";
     if (!formData.phoneNumber.trim()) return "Phone number is required";
     if (!/^\d{10}$/.test(formData.phoneNumber)) return "Phone number must be exactly 10 digits";
     if (!/^\d+$/.test(formData.phoneNumber)) return "Phone number can only contain digits";
     if (!formData.address.trim()) return "Address is required";
     if (!formData.idNumber.trim()) return "ID number is required";
     return "";
+  };
+
+  // Check if user has an active pass of the given type
+  const hasActivePass = (passType: string) => {
+    const now = new Date();
+    return previousApplications.some(app => {
+      // Match pass type (day, weekly, monthly)
+      const appPassType = app.passType?.toLowerCase().trim() || "";
+      const checkType = passType.toLowerCase().trim();
+      
+      // Check if approved and has valid RFID
+      if (app.status !== "approved" || !app.rfidUid) {
+        return false;
+      }
+      
+      // Check if pass type matches exactly (not just contains)
+      // appPassType might be "day" or "DAY" in database
+      if (appPassType !== checkType) {
+        return false;
+      }
+      
+      // Check if pass is still valid
+      if (app.passValidity) {
+        return new Date(app.passValidity) > now;
+      }
+      
+      return false;
+    });
+  };
+
+  // Get active pass details for a specific type
+  const getActivePassInfo = (passType: string) => {
+    const now = new Date();
+    return previousApplications.find(app => {
+      const appPassType = app.passType?.toLowerCase().trim() || "";
+      const checkType = passType.toLowerCase().trim();
+      
+      return app.status === "approved" && 
+             app.rfidUid &&
+             appPassType === checkType && 
+             app.passValidity && 
+             new Date(app.passValidity) > now;
+    });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -130,6 +227,27 @@ export default function PassengerDashboard({ onLogout }: Props) {
       setDocuments([files[0]]);
       setError("");
     }
+  };
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      const photoFile = files[0];
+      setPhoto(photoFile);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setPhotoPreview(event.target?.result as string);
+      };
+      reader.readAsDataURL(photoFile);
+      setError("");
+    }
+  };
+
+  const removePhoto = () => {
+    setPhoto(null);
+    setPhotoPreview(null);
   };
 
   const removeDocument = (idx: number) => {
@@ -173,6 +291,11 @@ export default function PassengerDashboard({ onLogout }: Props) {
       documents.forEach((doc) => {
         formDataObj.append("documents", doc);
       });
+
+      // Add photo if available
+      if (photo) {
+        formDataObj.append("photo", photo);
+      }
 
       // If reapplying, use the update endpoint, otherwise use register
       const endpoint = reapplyingId 
@@ -269,69 +392,132 @@ export default function PassengerDashboard({ onLogout }: Props) {
               gap: "24px",
               marginBottom: "40px"
             }}>
-              {passTypes.map((pass) => (
-                <div
-                  key={pass.type}
-                  onClick={() => {
-                    setSelectedPass(pass.type);
-                    setStep("details");
-                  }}
-                  style={{
-                    background: "#fff",
-                    border: "2px solid #e5e7eb",
-                    borderRadius: "12px",
-                    padding: "28px",
-                    cursor: "pointer",
-                    transition: "all 0.3s ease",
-                    transform: selectedPass === pass.type ? "scale(1.02)" : "scale(1)"
-                  }}
-                  onMouseOver={(e) => {
-                    e.currentTarget.style.borderColor = "#10b981";
-                    e.currentTarget.style.boxShadow = "0 8px 16px rgba(16,185,129,0.15)";
-                    e.currentTarget.style.transform = "translateY(-4px)";
-                  }}
-                  onMouseOut={(e) => {
-                    e.currentTarget.style.borderColor = "#e5e7eb";
-                    e.currentTarget.style.boxShadow = "none";
-                    e.currentTarget.style.transform = selectedPass === pass.type ? "scale(1.02)" : "scale(1)";
-                  }}
-                >
-                  <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>{pass.icon}</div>
-                  <h4 style={{ margin: "0 0 8px 0", fontSize: "1.25rem", color: "#0b1220" }}>
-                    {pass.name}
-                  </h4>
-                  <div style={{
-                    fontSize: "1.75rem",
-                    fontWeight: "700",
-                    color: "#10b981",
-                    marginBottom: "8px"
-                  }}>
-                    {pass.price}
-                  </div>
-                  <p style={{ color: "#6b7280", margin: "0 0 16px 0", fontSize: "0.95rem" }}>
-                    {pass.desc}
-                  </p>
-                  <ul style={{
-                    listStyle: "none",
-                    padding: 0,
-                    margin: 0
-                  }}>
-                    {pass.benefits.map((benefit, idx) => (
-                      <li key={idx} style={{
-                        color: "#6b7280",
-                        fontSize: "0.9rem",
-                        marginBottom: "6px",
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: "8px"
+              {passTypes.map((pass) => {
+                const isActive = hasActivePass(pass.type);
+                const activePassInfo = getActivePassInfo(pass.type);
+                
+                return (
+                  <div
+                    key={pass.type}
+                    onClick={() => {
+                      if (!isActive) {
+                        setSelectedPass(pass.type);
+                        setStep("details");
+                      }
+                    }}
+                    style={{
+                      background: isActive ? "#f3f4f6" : "#fff",
+                      border: isActive ? "2px solid #d1d5db" : "2px solid #e5e7eb",
+                      borderRadius: "12px",
+                      padding: "28px",
+                      cursor: isActive ? "not-allowed" : "pointer",
+                      transition: "all 0.3s ease",
+                      transform: selectedPass === pass.type ? "scale(1.02)" : "scale(1)",
+                      opacity: isActive ? 0.6 : 1,
+                      position: "relative"
+                    }}
+                    onMouseOver={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.borderColor = "#10b981";
+                        e.currentTarget.style.boxShadow = "0 8px 16px rgba(16,185,129,0.15)";
+                        e.currentTarget.style.transform = "translateY(-4px)";
+                      }
+                    }}
+                    onMouseOut={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.borderColor = "#e5e7eb";
+                        e.currentTarget.style.boxShadow = "none";
+                        e.currentTarget.style.transform = selectedPass === pass.type ? "scale(1.02)" : "scale(1)";
+                      }
+                    }}
+                  >
+                    {isActive && (
+                      <div style={{
+                        position: "absolute",
+                        top: "12px",
+                        right: "12px",
+                        background: "#10b981",
+                        color: "white",
+                        padding: "4px 8px",
+                        borderRadius: "12px",
+                        fontSize: "0.75rem",
+                        fontWeight: "600"
                       }}>
-                        <span style={{ color: "#10b981", fontWeight: "700" }}>✓</span>
-                        {benefit}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+                        ✅ ACTIVE
+                      </div>
+                    )}
+                    
+                    <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>{pass.icon}</div>
+                    <h4 style={{ margin: "0 0 8px 0", fontSize: "1.25rem", color: isActive ? "#9ca3af" : "#0b1220" }}>
+                      {pass.name}
+                    </h4>
+                    <div style={{
+                      fontSize: "1.75rem",
+                      fontWeight: "700",
+                      color: isActive ? "#9ca3af" : "#10b981",
+                      marginBottom: "8px"
+                    }}>
+                      {pass.price}
+                    </div>
+                    <p style={{ color: isActive ? "#9ca3af" : "#6b7280", margin: "0 0 16px 0", fontSize: "0.95rem" }}>
+                      {pass.desc}
+                    </p>
+
+                    {isActive && activePassInfo && (
+                      <div style={{
+                        background: "#dcfce7",
+                        padding: "8px 12px",
+                        borderRadius: "6px",
+                        marginBottom: "12px",
+                        border: "1px solid #10b981"
+                      }}>
+                        <p style={{ margin: "0", fontSize: "0.8rem", color: "#059669", fontWeight: "600" }}>
+                          Valid until: {formatDate(activePassInfo.passValidity)}
+                        </p>
+                      </div>
+                    )}
+
+                    <ul style={{
+                      listStyle: "none",
+                      padding: 0,
+                      margin: 0
+                    }}>
+                      {pass.benefits.map((benefit, idx) => (
+                        <li key={idx} style={{
+                          color: isActive ? "#9ca3af" : "#6b7280",
+                          fontSize: "0.9rem",
+                          marginBottom: "6px",
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "8px"
+                        }}>
+                          <span style={{ color: isActive ? "#9ca3af" : "#10b981", fontWeight: "700" }}>✓</span>
+                          {benefit}
+                        </li>
+                      ))}
+                    </ul>
+
+                    {isActive && (
+                      <div style={{
+                        marginTop: "16px",
+                        textAlign: "center"
+                      }}>
+                        <p style={{ 
+                          margin: "0", 
+                          fontSize: "0.85rem", 
+                          color: "#7c2d12", 
+                          fontWeight: "600",
+                          background: "#fed7aa",
+                          padding: "8px 12px",
+                          borderRadius: "6px"
+                        }}>
+                          You already have an active {pass.name}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Info Box */}
@@ -422,7 +608,7 @@ export default function PassengerDashboard({ onLogout }: Props) {
                 {/* Age */}
                 <div style={{ marginBottom: "20px" }}>
                   <label style={{ display: "block", fontSize: "0.95rem", fontWeight: "600", color: "#0b1220", marginBottom: "8px" }}>
-                    Age *
+                    Age * (5-200 years)
                   </label>
                   <input
                     type="text"
@@ -430,11 +616,13 @@ export default function PassengerDashboard({ onLogout }: Props) {
                     value={formData.age}
                     onChange={(e) => {
                       const value = e.target.value;
-                      if (/^\d*$/.test(value) || value === "") {
+                      // Only allow digits and max 3 digits
+                      if ((/^\d*$/.test(value) || value === "") && value.length <= 3) {
                         handleInputChange(e);
                       }
                     }}
-                    placeholder="Enter your age (digits only)"
+                    maxLength={3}
+                    placeholder="Enter your age (5-200, max 3 digits)"
                     style={{
                       width: "100%",
                       padding: "10px 12px",
@@ -799,6 +987,115 @@ export default function PassengerDashboard({ onLogout }: Props) {
                 📝 Document upload is optional. You can submit without uploading, but uploading helps with faster verification.
               </div>
 
+              {/* Photo Upload Section */}
+              <div style={{ marginBottom: "32px", paddingTop: "32px", borderTop: "2px solid #e5e7eb" }}>
+                <h3 style={{ fontSize: "1.2rem", color: "#0b1220", margin: "0 0 12px 0" }}>
+                  📸 Upload Your Photo
+                </h3>
+                <p style={{ color: "#6b7280", margin: "0 0 20px 0", fontSize: "0.9rem" }}>
+                  Upload a clear passport-style photo (will be verified by admin and shown to conductor)
+                </p>
+
+                {!photo ? (
+                  <div
+                    style={{
+                      background: "#eff6ff",
+                      border: "2px dashed #3b82f6",
+                      borderRadius: "12px",
+                      padding: "40px 20px",
+                      textAlign: "center",
+                      cursor: "pointer",
+                      transition: "all 0.3s ease"
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.background = "#dbeafe";
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.background = "#eff6ff";
+                    }}
+                  >
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handlePhotoChange}
+                      style={{ display: "none" }}
+                      id="photo-input"
+                    />
+                    <label
+                      htmlFor="photo-input"
+                      style={{
+                        cursor: "pointer",
+                        display: "block"
+                      }}
+                    >
+                      <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>🎥</div>
+                      <h4 style={{ margin: "0 0 4px 0", color: "#0b1220" }}>Click to upload photo</h4>
+                      <p style={{ color: "#6b7280", margin: 0, fontSize: "0.9rem" }}>
+                        JPG, PNG up to 5MB (Passport style recommended)
+                      </p>
+                    </label>
+                  </div>
+                ) : (
+                  <div style={{ marginBottom: "20px" }}>
+                    <div style={{
+                      background: "#f9fafb",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      border: "1px solid #e5e7eb",
+                      display: "flex",
+                      gap: "12px",
+                      alignItems: "center"
+                    }}>
+                      <img
+                        src={photoPreview || ""}
+                        alt="Photo preview"
+                        style={{
+                          width: "60px",
+                          height: "60px",
+                          borderRadius: "6px",
+                          objectFit: "cover"
+                        }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: "0.9rem", fontWeight: "500", color: "#0b1220" }}>
+                          {photo?.name}
+                        </div>
+                        <div style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+                          {(photo?.size / 1024 / 1024).toFixed(2)} MB
+                        </div>
+                      </div>
+                      <button
+                        onClick={removePhoto}
+                        style={{
+                          background: "#fee2e2",
+                          border: "none",
+                          color: "#dc2626",
+                          borderRadius: "6px",
+                          padding: "6px 12px",
+                          cursor: "pointer",
+                          fontSize: "0.85rem",
+                          fontWeight: "600"
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{
+                  background: "linear-gradient(135deg, #dbeafe, #bfdbfe)",
+                  padding: "12px",
+                  borderRadius: "8px",
+                  borderLeft: "4px solid #3b82f6",
+                  marginTop: "12px",
+                  fontSize: "0.85rem",
+                  color: "#1e40af"
+                }}>
+                  ℹ️ Photo is required for identity verification during conductor checks at bus door.
+                </div>
+              </div>
+
               {/* Action Buttons */}
               <div style={{ display: "flex", gap: "12px" }}>
                 <button
@@ -882,6 +1179,7 @@ export default function PassengerDashboard({ onLogout }: Props) {
               onClick={() => {
                 setStep("select");
                 setSelectedPass(null);
+                fetchApplications();
               }}
               style={{
                 padding: "12px 32px",
@@ -902,7 +1200,7 @@ export default function PassengerDashboard({ onLogout }: Props) {
                 e.currentTarget.style.boxShadow = "none";
               }}
             >
-              Apply for Another Pass
+              Done
             </button>
           </div>
         )}
@@ -919,6 +1217,26 @@ export default function PassengerDashboard({ onLogout }: Props) {
               Track the status of your bus pass applications
             </p>
           </div>
+          
+          {/* Real-time Status Indicator */}
+          <div style={{
+            background: "#f0fdf4",
+            border: "1px solid #86efac",
+            borderRadius: "8px",
+            padding: "8px 12px",
+            marginBottom: "16px",
+            fontSize: "0.85rem",
+            color: "#166534",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px"
+          }}>
+            <span style={{ fontSize: "1rem" }}>🔄</span>
+            <span>Pass status updates automatically every 30 seconds</span>
+            <span style={{ marginLeft: "auto", fontSize: "0.8rem", opacity: 0.8 }}>
+              Last updated: {lastUpdate.toLocaleTimeString()}
+            </span>
+          </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             {previousApplications
@@ -934,9 +1252,17 @@ export default function PassengerDashboard({ onLogout }: Props) {
                 return isLatestOfType;
               })
               .map((app) => {
-                const statusColor = app.status === "approved" ? "#10b981" : app.status === "declined" ? "#ef4444" : "#f59e0b";
-                const statusBg = app.status === "approved" ? "#f0fdf4" : app.status === "declined" ? "#fef2f2" : "#fffbeb";
-                const statusIcon = app.status === "approved" ? "✅" : app.status === "declined" ? "❌" : "⏳";
+                // Check if pass is expired (real-time with lastUpdate trigger)
+                const now = lastUpdate;
+                const isExpired = app.status === "approved" && app.passValidity && new Date(app.passValidity) < now;
+                
+                // Check if pass has been deleted (rfidUid removed by admin)
+                const isDeleted = app.status === "approved" && !app.rfidUid;
+                
+                const statusColor = (isDeleted || isExpired) ? "#ef4444" : (app.status === "approved" ? "#10b981" : app.status === "declined" ? "#ef4444" : "#f59e0b");
+                const statusBg = (isDeleted || isExpired) ? "#fef2f2" : (app.status === "approved" ? "#f0fdf4" : app.status === "declined" ? "#fef2f2" : "#fffbeb");
+                const statusIcon = (isDeleted || isExpired) ? "⏰" : (app.status === "approved" ? "✅" : app.status === "declined" ? "❌" : "⏳");
+                const statusText = isDeleted ? "Deleted" : (isExpired ? "Expired" : (app.status.charAt(0).toUpperCase() + app.status.slice(1)));
 
                 return (
                   <div
@@ -974,15 +1300,87 @@ export default function PassengerDashboard({ onLogout }: Props) {
                             alignItems: "center",
                             gap: "6px"
                           }}>
-                            {statusIcon} {app.status.charAt(0).toUpperCase() + app.status.slice(1)}
+                            {statusIcon} {statusText}
                           </span>
                         </div>
                         <p style={{ color: "#6b7280", margin: "0 0 8px 0", fontSize: "0.9rem" }}>
                           <strong>Name:</strong> {app.passengerName}
                         </p>
                         <p style={{ color: "#6b7280", margin: "0 0 8px 0", fontSize: "0.9rem" }}>
-                          <strong>Applied:</strong> {new Date(app.createdAt).toLocaleDateString()}
+                          <strong>Applied:</strong> {formatDate(app.createdAt)}
                         </p>
+                        
+                        {/* Show expiry/deleted warning */}
+                        {(isExpired || isDeleted) && (
+                          <div style={{
+                            background: "#fef2f2",
+                            border: "1px solid #fecaca",
+                            borderRadius: "8px",
+                            padding: "12px",
+                            marginTop: "12px",
+                            color: "#dc2626"
+                          }}>
+                            <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: "600", marginBottom: "4px" }}>
+                              {isDeleted ? "❌ Pass Deleted" : "⏰ Pass Expired"}
+                            </p>
+                            <p style={{ margin: "0 0 12px 0", fontSize: "0.85rem" }}>
+                              {isDeleted 
+                                ? "Your pass has been deleted by the administrator. Please contact support or apply for a new pass."
+                                : `This pass expired on ${formatDate(app.passValidity)}.`
+                              }
+                            </p>
+                            
+                            {!isDeleted && (
+                              <>
+                                {app.renewalRequested ? (
+                                  // Show pending renewal message
+                                  <div style={{
+                                    padding: "10px 20px",
+                                    background: "#3b82f6",
+                                    color: "#fff",
+                                    borderRadius: "6px",
+                                    fontWeight: "600",
+                                    fontSize: "0.9rem",
+                                    textAlign: "center"
+                                  }}>
+                                    ⏳ Renewal Pending - Tap Card at Conductor Panel
+                                  </div>
+                                ) : (
+                                  // Show renew button only for expired (not deleted) passes
+                                  <button
+                                    onClick={() => renewPass(app.id)}
+                                    disabled={renewing === app.id}
+                                    style={{
+                                      padding: "10px 20px",
+                                      background: renewing === app.id ? "#fbbf24" : "#f59e0b",
+                                      color: "#fff",
+                                      border: "none",
+                                      borderRadius: "6px",
+                                      cursor: renewing === app.id ? "not-allowed" : "pointer",
+                                      fontWeight: "600",
+                                      fontSize: "0.9rem",
+                                      width: "100%",
+                                      transition: "all 0.3s ease"
+                                    }}
+                                    onMouseOver={(e) => {
+                                      if (renewing !== app.id) {
+                                        e.currentTarget.style.background = "#d97706";
+                                      }
+                                    }}
+                                    onMouseOut={(e) => {
+                                      if (renewing !== app.id) {
+                                        e.currentTarget.style.background = "#f59e0b";
+                                      }
+                                    }}
+                                  >
+                                    {renewing === app.id ? "⏳ Renewing..." : "🔄 Renew Pass (Tap Card to Activate)"}
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                        
                         {app.declineReason && (
                           <div style={{
                             background: "#fef2f2",
@@ -1000,7 +1398,7 @@ export default function PassengerDashboard({ onLogout }: Props) {
                             </p>
                           </div>
                         )}
-                        {app.status === "approved" && app.uniquePassId && (
+                        {app.status === "approved" && app.uniquePassId && !isExpired && !isDeleted && (
                           <div style={{
                             background: "#f0fdf4",
                             border: "2px solid #10b981",
@@ -1031,6 +1429,30 @@ export default function PassengerDashboard({ onLogout }: Props) {
                             <p style={{ margin: "8px 0 0 0", fontSize: "0.8rem", color: "#6b7280" }}>
                               Use this ID to login to the mobile app
                             </p>
+                            {app.rfidUid && (
+                              <>
+                                <p style={{ margin: "12px 0 4px 0", fontSize: "0.85rem" }}>
+                                  <strong>💳 Card Number (UID):</strong>
+                                </p>
+                                <div style={{
+                                  background: "#fff",
+                                  padding: "8px",
+                                  borderRadius: "6px",
+                                  fontFamily: "monospace",
+                                  fontSize: "0.85rem",
+                                  textAlign: "center",
+                                  color: "#0b1220",
+                                  fontWeight: "600",
+                                  userSelect: "all",
+                                  letterSpacing: "0.5px"
+                                }}>
+                                  {app.rfidUid}
+                                </div>
+                                <p style={{ margin: "4px 0 0 0", fontSize: "0.75rem", color: "#6b7280" }}>
+                                  📱 Your RFID card identifier
+                                </p>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>

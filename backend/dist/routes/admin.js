@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const db_1 = require("../db");
+const rfid_1 = require("../utils/rfid");
 const router = (0, express_1.Router)();
 // GET /api/admin/registrations?status=pending&type=student|passenger
 router.get('/registrations', async (req, res) => {
@@ -41,43 +42,262 @@ router.get('/registrations/all', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch registrations' });
     }
 });
+// GET /api/admin/check-card/:rfidUid - Check if card already has valid pass
+router.get('/check-card/:rfidUid', async (req, res) => {
+    const { rfidUid } = req.params;
+    try {
+        // Check in StudentRegistration
+        const studentPass = await db_1.prisma.studentRegistration.findFirst({
+            where: { rfidUid }
+        });
+        // Check in PassengerRegistration
+        const passengerPass = await db_1.prisma.passengerRegistration.findFirst({
+            where: { rfidUid }
+        });
+        // Check if either has a valid (non-expired) pass
+        const now = new Date();
+        const studentValid = studentPass && studentPass.passValidity && studentPass.passValidity > now;
+        const passengerValid = passengerPass && passengerPass.passValidity && passengerPass.passValidity > now;
+        if (studentValid) {
+            return res.json({
+                hasValidPass: true,
+                isStudent: true,
+                existingPass: {
+                    name: studentPass.studentName,
+                    type: 'student_monthly',
+                    expiryDate: studentPass.passValidity,
+                    id: studentPass.id,
+                    status: 'active'
+                }
+            });
+        }
+        if (passengerValid) {
+            return res.json({
+                hasValidPass: true,
+                isStudent: false,
+                existingPass: {
+                    name: passengerPass.passengerName,
+                    type: passengerPass.passType || 'daily',
+                    expiryDate: passengerPass.passValidity,
+                    id: passengerPass.id,
+                    status: 'active'
+                }
+            });
+        }
+        res.json({ hasValidPass: false });
+    }
+    catch (err) {
+        console.error('Error checking card validity:', err);
+        res.status(500).json({ error: 'Failed to check card validity' });
+    }
+});
 // POST /api/admin/registrations/:id/approve - Approve student registration
 router.post('/registrations/:id/approve', async (req, res) => {
     const { id } = req.params;
+    const { simulate = false, force = false } = req.body; // force=true to overwrite existing pass
     try {
         const reg = await db_1.prisma.studentRegistration.update({
             where: { id: Number(id) },
             data: { status: 'approved' },
         });
-        const passNumber = `P-${Date.now().toString().slice(-6)}`;
-        const busPass = await db_1.prisma.busPass.create({
+        // Generate unique pass ID and write to RFID
+        const uniquePassId = (0, rfid_1.generateUniquePassId)();
+        const passValidity = new Date();
+        passValidity.setFullYear(passValidity.getFullYear() + 1);
+        const payload = (0, rfid_1.prepareRFIDPayload)({
+            uniquePassId,
+            passengerName: reg.studentName,
+            passType: 'student_monthly',
+            validity: passValidity,
+            email: '',
+            phoneNumber: '',
+        });
+        // Write to RFID card
+        const rfidUid = await (0, rfid_1.writeToRFIDCard)(payload, 'COM5', simulate);
+        // Check if this card already has a valid pass (unless force=true)
+        if (!force && rfidUid) {
+            const existingStudent = await db_1.prisma.studentRegistration.findFirst({
+                where: { rfidUid }
+            });
+            const existingPassenger = await db_1.prisma.passengerRegistration.findFirst({
+                where: { rfidUid }
+            });
+            const now = new Date();
+            const hasValidStudent = existingStudent && existingStudent.passValidity && existingStudent.passValidity > now;
+            const hasValidPassenger = existingPassenger && existingPassenger.passValidity && existingPassenger.passValidity > now;
+            if (hasValidStudent || hasValidPassenger) {
+                const existing = hasValidStudent ? existingStudent : existingPassenger;
+                return res.status(409).json({
+                    error: 'CARD_ALREADY_HAS_VALID_PASS',
+                    message: '⚠️ This card already has an active pass',
+                    existingPass: {
+                        name: hasValidStudent ? existing.studentName : existing.passengerName,
+                        type: hasValidStudent ? 'student' : existing.passType,
+                        expiryDate: existing?.passValidity,
+                        isStudent: !!hasValidStudent
+                    },
+                    shouldPromptOverride: true
+                });
+            }
+        }
+        // Update with RFID data
+        await db_1.prisma.studentRegistration.update({
+            where: { id: Number(id) },
             data: {
-                studentRegistrationId: reg.id,
-                passNumber,
-                expiryDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
-                status: 'active',
+                uniquePassId,
+                rfidUid: rfidUid || undefined,
+                passValidity,
             },
         });
-        res.json({ busPass, message: 'Student registration approved' });
+        // Create bus pass record
+        try {
+            const passNumber = `P-${Date.now().toString().slice(-6)}`;
+            await db_1.prisma.busPass.create({
+                data: {
+                    studentRegistrationId: reg.id,
+                    passNumber,
+                    expiryDate: passValidity,
+                    rfidUid: rfidUid || undefined,
+                    status: 'active',
+                },
+            });
+        }
+        catch (busPassErr) {
+            console.warn('Could not create BusPass record:', busPassErr);
+            // Continue anyway - pass is still approved
+        }
+        res.json({
+            registration: reg,
+            uniquePassId,
+            rfidUid,
+            message: 'Student registration approved and pass written to RFID card'
+        });
     }
     catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to approve registration' });
+        console.error('❌ Error approving student registration:', err);
+        const errorMsg = err.message;
+        // Return specific error messages based on what went wrong
+        let userMessage = 'Failed to approve registration';
+        if (errorMsg.includes('RFID read timeout')) {
+            userMessage = '❌ RFID card not detected! Please place the card near EM-18 reader and try again.';
+        }
+        else if (errorMsg.includes('Port is not open')) {
+            userMessage = '❌ COM5 port not available. Close Prisma Studio and try again.';
+        }
+        else if (errorMsg.includes('no card detected')) {
+            userMessage = '❌ No card detected within 30 seconds. Please place your card on the EM-18 reader.';
+        }
+        console.error('Error details:', {
+            message: errorMsg,
+            userMessage: userMessage
+        });
+        res.status(500).json({
+            error: userMessage,
+            details: errorMsg
+        });
     }
 });
 // POST /api/admin/passenger-registrations/:id/approve - Approve passenger registration
 router.post('/passenger-registrations/:id/approve', async (req, res) => {
     const { id } = req.params;
+    const { simulate = false, force = false } = req.body; // force=true to overwrite existing pass
+    console.log(`🎫 Approving passenger registration ${id}, simulate=${simulate}`);
     try {
         const reg = await db_1.prisma.passengerRegistration.update({
             where: { id: Number(id) },
-            data: { status: 'approved', declineReason: null }
+            data: { status: 'approved' }
         });
-        res.json({ registration: reg, message: 'Passenger pass request approved' });
+        // Generate unique pass ID and write to RFID
+        const uniquePassId = (0, rfid_1.generateUniquePassId)();
+        // Calculate expiry based on pass type
+        const passValidity = new Date();
+        if (reg.passType === 'day') {
+            passValidity.setHours(passValidity.getHours() + 24);
+        }
+        else if (reg.passType === 'weekly') {
+            passValidity.setDate(passValidity.getDate() + 7);
+        }
+        else if (reg.passType === 'monthly') {
+            passValidity.setDate(passValidity.getDate() + 30);
+        }
+        else {
+            // Default to 1 year for any other type
+            passValidity.setFullYear(passValidity.getFullYear() + 1);
+        }
+        const payload = (0, rfid_1.prepareRFIDPayload)({
+            uniquePassId,
+            passengerName: reg.passengerName,
+            passType: reg.passType,
+            validity: passValidity,
+            email: reg.email,
+            phoneNumber: reg.phoneNumber || '',
+        });
+        // Write to RFID card
+        const rfidUid = await (0, rfid_1.writeToRFIDCard)(payload, 'COM5', simulate);
+        // Check if this card already has a valid pass (unless force=true)
+        if (!force && rfidUid) {
+            const existingStudent = await db_1.prisma.studentRegistration.findFirst({
+                where: { rfidUid }
+            });
+            const existingPassenger = await db_1.prisma.passengerRegistration.findFirst({
+                where: { rfidUid, id: { not: Number(id) } } // Don't check against itself
+            });
+            const now = new Date();
+            const hasValidStudent = existingStudent && existingStudent.passValidity && existingStudent.passValidity > now;
+            const hasValidPassenger = existingPassenger && existingPassenger.passValidity && existingPassenger.passValidity > now;
+            if (hasValidStudent || hasValidPassenger) {
+                const existing = hasValidStudent ? existingStudent : existingPassenger;
+                return res.status(409).json({
+                    error: 'CARD_ALREADY_HAS_VALID_PASS',
+                    message: '⚠️ This card already has an active pass',
+                    existingPass: {
+                        name: hasValidStudent ? existing.studentName : existing.passengerName,
+                        type: hasValidStudent ? 'student' : existing.passType,
+                        expiryDate: existing?.passValidity,
+                        isStudent: !!hasValidStudent
+                    },
+                    shouldPromptOverride: true
+                });
+            }
+        }
+        // Update with RFID data
+        await db_1.prisma.passengerRegistration.update({
+            where: { id: Number(id) },
+            data: {
+                uniquePassId: uniquePassId,
+                rfidUid: rfidUid || undefined,
+                passValidity: passValidity,
+            },
+        });
+        res.json({
+            registration: reg,
+            uniquePassId,
+            rfidUid,
+            message: 'Passenger pass request approved and written to RFID card'
+        });
     }
     catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to approve passenger registration' });
+        console.error('❌ Error approving passenger registration:', err);
+        const errorMsg = err.message;
+        // Return specific error messages based on what went wrong
+        let userMessage = 'Failed to approve passenger registration';
+        if (errorMsg.includes('RFID read timeout')) {
+            userMessage = '❌ RFID card not detected! Please place the card near EM-18 reader and try again.';
+        }
+        else if (errorMsg.includes('Port is not open')) {
+            userMessage = '❌ COM5 port not available. Close Prisma Studio and try again.';
+        }
+        else if (errorMsg.includes('no card detected')) {
+            userMessage = '❌ No card detected within 30 seconds. Please place your card on the EM-18 reader.';
+        }
+        console.error('Error details:', {
+            message: errorMsg,
+            userMessage: userMessage
+        });
+        res.status(500).json({
+            error: userMessage,
+            details: errorMsg
+        });
     }
 });
 // POST /api/admin/passenger-registrations/:id/decline - Decline passenger registration with reason
@@ -90,13 +310,128 @@ router.post('/passenger-registrations/:id/decline', async (req, res) => {
     try {
         const reg = await db_1.prisma.passengerRegistration.update({
             where: { id: Number(id) },
-            data: { status: 'declined', declineReason: reason }
+            data: {
+                status: 'declined',
+                declineReason: reason
+            }
         });
         res.json({ registration: reg, message: 'Passenger pass request declined' });
     }
     catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to decline passenger registration' });
+    }
+});
+/**
+ * GET /api/admin/approved-passes
+ * Get all approved passes (both students and passengers)
+ */
+router.get('/approved-passes', async (req, res) => {
+    try {
+        const [approvedStudents, approvedPassengers] = await Promise.all([
+            db_1.prisma.studentRegistration.findMany({
+                where: { status: 'approved' },
+                orderBy: { createdAt: 'desc' }
+            }),
+            db_1.prisma.passengerRegistration.findMany({
+                where: { status: 'approved' },
+                orderBy: { createdAt: 'desc' }
+            })
+        ]);
+        res.json({
+            students: approvedStudents,
+            passengers: approvedPassengers,
+            total: approvedStudents.length + approvedPassengers.length
+        });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch approved passes' });
+    }
+});
+/**
+ * POST /api/admin/student-passes/:id/hide
+ * Hide an approved student pass from dashboard (but keep data in database)
+ */
+router.post('/student-passes/:id/hide', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const pass = await db_1.prisma.studentRegistration.update({
+            where: { id: Number(id) },
+            data: { status: 'archived' }
+        });
+        res.json({ success: true, message: 'Student pass hidden from dashboard', pass });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to hide student pass' });
+    }
+});
+/**
+ * POST /api/admin/passenger-passes/:id/hide
+ * Hide an approved passenger pass from dashboard (but keep data in database)
+ */
+router.post('/passenger-passes/:id/hide', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const pass = await db_1.prisma.passengerRegistration.update({
+            where: { id: Number(id) },
+            data: { status: 'archived' }
+        });
+        res.json({ success: true, message: 'Passenger pass hidden from dashboard', pass });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to hide passenger pass' });
+    }
+});
+// GET /api/admin/check-card/:rfidUid - Check if card already has valid pass
+router.get('/check-card/:rfidUid', async (req, res) => {
+    const { rfidUid } = req.params;
+    try {
+        // Check in StudentRegistration
+        const studentPass = await db_1.prisma.studentRegistration.findFirst({
+            where: { rfidUid }
+        });
+        // Check in PassengerRegistration
+        const passengerPass = await db_1.prisma.passengerRegistration.findFirst({
+            where: { rfidUid }
+        });
+        // Check if either has a valid (non-expired) pass
+        const now = new Date();
+        const studentValid = studentPass && studentPass.passValidity && studentPass.passValidity > now;
+        const passengerValid = passengerPass && passengerPass.passValidity && passengerPass.passValidity > now;
+        if (studentValid) {
+            return res.json({
+                hasValidPass: true,
+                isStudent: true,
+                existingPass: {
+                    name: studentPass.studentName,
+                    type: 'student_monthly',
+                    expiryDate: studentPass.passValidity,
+                    id: studentPass.id,
+                    status: 'active'
+                }
+            });
+        }
+        if (passengerValid) {
+            return res.json({
+                hasValidPass: true,
+                isStudent: false,
+                existingPass: {
+                    name: passengerPass.passengerName,
+                    type: passengerPass.passType || 'daily',
+                    expiryDate: passengerPass.passValidity,
+                    id: passengerPass.id,
+                    status: 'active'
+                }
+            });
+        }
+        res.json({ hasValidPass: false });
+    }
+    catch (err) {
+        console.error('Error checking card validity:', err);
+        res.status(500).json({ error: 'Failed to check card validity' });
     }
 });
 exports.default = router;

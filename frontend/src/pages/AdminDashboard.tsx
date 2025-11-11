@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from "react";
 
+// Helper function to format date as DD-MM-YYYY
+const formatDate = (dateString: string | null | undefined): string => {
+  if (!dateString) return "N/A";
+  const date = new Date(dateString);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
 interface Reg {
   id: number;
   studentName?: string;
@@ -15,6 +25,9 @@ interface Reg {
   status: string;
   declineReason?: string;
   type?: string;
+  documents?: string;
+  photoPath?: string;
+  photoVerified?: boolean;
 }
 
 type Props = {
@@ -22,7 +35,7 @@ type Props = {
 };
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [tab, setTab] = useState<"college" | "passenger" | "approved">("college");
+  const [tab, setTab] = useState<"college" | "passenger" | "approved" | "cardmgmt">("college");
   const [collegeItems, setCollegeItems] = useState<Reg[]>([]);
   const [passengerItems, setPassengerItems] = useState<Reg[]>([]);
   const [approvedStudents, setApprovedStudents] = useState<Reg[]>([]);
@@ -41,6 +54,15 @@ export default function AdminDashboard({ onLogout }: Props) {
   const [duplicateCard, setDuplicateCard] = useState<{ isStudent: boolean; name: string; type: string; expiryDate: Date } | null>(null);
   const [duplicateCardOverride, setDuplicateCardOverride] = useState(false);
 
+  // Card Management states
+  const [scanning, setScanning] = useState(false);
+  const [scannedCard, setScannedCard] = useState<any>(null);
+  const [expiring, setExpiring] = useState(false);
+  const [erasing, setErasing] = useState(false);
+  
+  // Real-time status update state
+  const [lastUpdate, setLastUpdate] = useState(new Date());
+
   useEffect(() => {
     const token = localStorage.getItem("sbp_token");
     if (!token) {
@@ -49,6 +71,11 @@ export default function AdminDashboard({ onLogout }: Props) {
     }
 
     setLoading(true);
+    // Clear previous data before fetching new data
+    setCollegeItems([]);
+    setPassengerItems([]);
+    setApprovedStudents([]);
+    setApprovedPassengers([]);
 
     // Fetch pending and approved registrations
     Promise.all([
@@ -74,6 +101,15 @@ export default function AdminDashboard({ onLogout }: Props) {
         setError("Failed to load registrations");
         setLoading(false);
       });
+  }, [tab]);
+  
+  // Auto-refresh status every 30 seconds for real-time updates
+  useEffect(() => {
+    const refreshInterval = setInterval(() => {
+      setLastUpdate(new Date());
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(refreshInterval);
   }, []);
 
   const approve = (id: number) => {
@@ -86,6 +122,10 @@ export default function AdminDashboard({ onLogout }: Props) {
     const endpoint = tab === "college" 
       ? `http://localhost:4000/api/admin/registrations/${id}/approve`
       : `http://localhost:4000/api/admin/passenger-registrations/${id}/approve`;
+
+    // Store for potential override
+    (window as any).__pendingPassId = id;
+    (window as any).__pendingPassType = tab === "college" ? "student" : "passenger";
 
     // Simulate progress stages for reading RFID card UID
     const progressIntervals = [
@@ -106,11 +146,26 @@ export default function AdminDashboard({ onLogout }: Props) {
 
     fetch(endpoint, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ simulate: false })
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ simulate: false, force: duplicateCardOverride })
     })
       .then((r) => r.json())
       .then((json) => {
+        // Handle duplicate card error
+        if (json.error === 'CARD_ALREADY_HAS_VALID_PASS' && json.shouldPromptOverride) {
+          setApproveProgress(0);
+          setApproveStage("");
+          setApproving(null);
+          setDuplicateCard({
+            isStudent: json.existingPass.isStudent,
+            name: json.existingPass.name,
+            type: json.existingPass.type,
+            expiryDate: new Date(json.existingPass.expiryDate)
+          });
+          setDuplicateCardOverride(false);
+          return;
+        }
+        
         if (json.busPass || json.registration) {
           // Show 100% completion
           setApproveProgress(100);
@@ -121,6 +176,10 @@ export default function AdminDashboard({ onLogout }: Props) {
             uniquePassId: json.uniquePassId || "N/A",
             rfidUid: json.rfidUid || "N/A"
           });
+          
+          // Clear duplicate card state
+          setDuplicateCard(null);
+          setDuplicateCardOverride(false);
           
           if (tab === "college") {
             setCollegeItems((s) => s.filter((it) => it.id !== id));
@@ -300,6 +359,108 @@ export default function AdminDashboard({ onLogout }: Props) {
       .finally(() => setDeleting(null));
   };
   
+  // Card Management Functions
+  const scanCard = async () => {
+    setScanning(true);
+    setScannedCard(null);
+
+    try {
+      const response = await fetch("http://localhost:4000/api/conductor/scan-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const data = await response.json();
+      setScannedCard(data);
+    } catch (error) {
+      setScannedCard({
+        valid: false,
+        message: "Failed to scan card. Please try again.",
+      });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const expireCard = async () => {
+    if (!scannedCard || !scannedCard.id || !scannedCard.type) {
+      alert("Cannot expire pass - missing information");
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to expire this ${scannedCard.type} pass for ${scannedCard.passengerName}?`)) {
+      return;
+    }
+
+    setExpiring(true);
+    try {
+      const token = localStorage.getItem("sbp_token");
+      const response = await fetch("http://localhost:4000/api/conductor/expire-pass", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          id: scannedCard.id,
+          type: scannedCard.type
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        alert("✅ Pass expired successfully! Scan card again to verify.");
+        setScannedCard(null);
+      } else {
+        alert("Error: " + (data.error || "Could not expire pass"));
+      }
+    } catch (error) {
+      alert("Error: " + String(error));
+    } finally {
+      setExpiring(false);
+    }
+  };
+
+  const eraseCard = async () => {
+    if (!scannedCard || !scannedCard.id || !scannedCard.type) {
+      alert("Cannot erase card - missing information");
+      return;
+    }
+
+    if (!window.confirm(`⚠️ WARNING: This will ERASE the card data for ${scannedCard.passengerName}!\n\nThis action will:\n- Remove RFID UID from the database\n- Allow the card to be reassigned\n- NOT delete the pass record\n\nAre you absolutely sure?`)) {
+      return;
+    }
+
+    setErasing(true);
+    try {
+      const token = localStorage.getItem("sbp_token");
+      const endpoint = scannedCard.type === "student" 
+        ? `http://localhost:4000/api/admin/erase-card/student/${scannedCard.id}`
+        : `http://localhost:4000/api/admin/erase-card/passenger/${scannedCard.id}`;
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        alert("✅ Card erased successfully! The card can now be reassigned.");
+        setScannedCard(null);
+      } else {
+        alert("Error: " + (data.error || "Could not erase card"));
+      }
+    } catch (error) {
+      alert("Error: " + String(error));
+    } finally {
+      setErasing(false);
+    }
+  };
 
   const getItems = () => {
     if (tab === "college") return collegeItems;
@@ -351,83 +512,281 @@ export default function AdminDashboard({ onLogout }: Props) {
       </div>
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "16px", marginBottom: "32px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px", marginBottom: "32px" }}>
         <div style={{
           background: "linear-gradient(135deg, #3b82f6, #2563eb)",
           color: "#fff",
-          padding: "24px",
-          borderRadius: "12px",
-          boxShadow: "0 4px 12px rgba(59,130,246,0.15)"
-        }}>
-          <div style={{ fontSize: "0.9rem", opacity: 0.9 }}>🏢 College Students Pending</div>
-          <div style={{ fontSize: "2.5rem", fontWeight: "700", marginTop: "8px" }}>{collegeItems.length}</div>
+          padding: "28px",
+          borderRadius: "14px",
+          boxShadow: "0 8px 20px rgba(59,130,246,0.2)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "start",
+          transition: "all 0.3s ease",
+          cursor: "pointer",
+          border: "1px solid rgba(255,255,255,0.1)"
+        }}
+        onMouseOver={(e) => {
+          e.currentTarget.style.transform = "translateY(-4px)";
+          e.currentTarget.style.boxShadow = "0 12px 28px rgba(59,130,246,0.3)";
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.transform = "none";
+          e.currentTarget.style.boxShadow = "0 8px 20px rgba(59,130,246,0.2)";
+        }}
+        >
+          <div>
+            <div style={{ fontSize: "0.9rem", opacity: 0.9, fontWeight: "500" }}>College Students</div>
+            <div style={{ fontSize: "0.8rem", opacity: 0.8, marginTop: "4px" }}>Pending Approval</div>
+            <div style={{ fontSize: "3rem", fontWeight: "800", marginTop: "12px" }}>{collegeItems.length}</div>
+          </div>
+          <div style={{ fontSize: "3rem", opacity: 0.3 }}>🏢</div>
         </div>
         <div style={{
           background: "linear-gradient(135deg, #10b981, #059669)",
           color: "#fff",
-          padding: "24px",
-          borderRadius: "12px",
-          boxShadow: "0 4px 12px rgba(16,185,129,0.15)"
-        }}>
-          <div style={{ fontSize: "0.9rem", opacity: 0.9 }}>🎫 Passenger Pass Requests</div>
-          <div style={{ fontSize: "2.5rem", fontWeight: "700", marginTop: "8px" }}>{passengerItems.length}</div>
+          padding: "28px",
+          borderRadius: "14px",
+          boxShadow: "0 8px 20px rgba(16,185,129,0.2)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "start",
+          transition: "all 0.3s ease",
+          cursor: "pointer",
+          border: "1px solid rgba(255,255,255,0.1)"
+        }}
+        onMouseOver={(e) => {
+          e.currentTarget.style.transform = "translateY(-4px)";
+          e.currentTarget.style.boxShadow = "0 12px 28px rgba(16,185,129,0.3)";
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.transform = "none";
+          e.currentTarget.style.boxShadow = "0 8px 20px rgba(16,185,129,0.2)";
+        }}
+        >
+          <div>
+            <div style={{ fontSize: "0.9rem", opacity: 0.9, fontWeight: "500" }}>Passenger Passes</div>
+            <div style={{ fontSize: "0.8rem", opacity: 0.8, marginTop: "4px" }}>Pending Approval</div>
+            <div style={{ fontSize: "3rem", fontWeight: "800", marginTop: "12px" }}>{passengerItems.length}</div>
+          </div>
+          <div style={{ fontSize: "3rem", opacity: 0.3 }}>🎫</div>
+        </div>
+        <div style={{
+          background: "linear-gradient(135deg, #8b5cf6, #7c3aed)",
+          color: "#fff",
+          padding: "28px",
+          borderRadius: "14px",
+          boxShadow: "0 8px 20px rgba(139,92,246,0.2)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "start",
+          transition: "all 0.3s ease",
+          cursor: "pointer",
+          border: "1px solid rgba(255,255,255,0.1)"
+        }}
+        onMouseOver={(e) => {
+          e.currentTarget.style.transform = "translateY(-4px)";
+          e.currentTarget.style.boxShadow = "0 12px 28px rgba(139,92,246,0.3)";
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.transform = "none";
+          e.currentTarget.style.boxShadow = "0 8px 20px rgba(139,92,246,0.2)";
+        }}
+        >
+          <div>
+            <div style={{ fontSize: "0.9rem", opacity: 0.9, fontWeight: "500" }}>Approved Passes</div>
+            <div style={{ fontSize: "0.8rem", opacity: 0.8, marginTop: "4px" }}>Total Active</div>
+            <div style={{ fontSize: "3rem", fontWeight: "800", marginTop: "12px" }}>{approvedStudents.length + approvedPassengers.length}</div>
+          </div>
+          <div style={{ fontSize: "3rem", opacity: 0.3 }}>✅</div>
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", borderBottom: "2px solid #e5e7eb" }}>
+      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", borderBottom: "2px solid #e5e7eb", flexWrap: "wrap" }}>
         <button
           onClick={() => setTab("college")}
           style={{
             padding: "12px 20px",
             border: "none",
-            background: "transparent",
+            background: tab === "college" ? "#eff6ff" : "transparent",
             color: tab === "college" ? "#3b82f6" : "#6b7280",
             fontSize: "1rem",
             fontWeight: tab === "college" ? "700" : "500",
             cursor: "pointer",
             borderBottom: tab === "college" ? "3px solid #3b82f6" : "none",
             transition: "all 0.2s ease",
-            marginBottom: "-2px"
+            marginBottom: "-2px",
+            borderRadius: "8px 8px 0 0",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px"
+          }}
+          onMouseOver={(e) => {
+            if (tab !== "college") {
+              e.currentTarget.style.background = "#f3f4f6";
+            }
+          }}
+          onMouseOut={(e) => {
+            if (tab !== "college") {
+              e.currentTarget.style.background = "transparent";
+            }
           }}
         >
           🏢 College Students
+          {collegeItems.length > 0 && (
+            <span style={{
+              background: "#3b82f6",
+              color: "#fff",
+              borderRadius: "12px",
+              padding: "2px 8px",
+              fontSize: "0.75rem",
+              fontWeight: "700"
+            }}>
+              {collegeItems.length}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setTab("passenger")}
           style={{
             padding: "12px 20px",
             border: "none",
-            background: "transparent",
+            background: tab === "passenger" ? "#f0fdf4" : "transparent",
             color: tab === "passenger" ? "#10b981" : "#6b7280",
             fontSize: "1rem",
             fontWeight: tab === "passenger" ? "700" : "500",
             cursor: "pointer",
             borderBottom: tab === "passenger" ? "3px solid #10b981" : "none",
             transition: "all 0.2s ease",
-            marginBottom: "-2px"
+            marginBottom: "-2px",
+            borderRadius: "8px 8px 0 0",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px"
+          }}
+          onMouseOver={(e) => {
+            if (tab !== "passenger") {
+              e.currentTarget.style.background = "#f3f4f6";
+            }
+          }}
+          onMouseOut={(e) => {
+            if (tab !== "passenger") {
+              e.currentTarget.style.background = "transparent";
+            }
           }}
         >
           🎫 Passengers
+          {passengerItems.length > 0 && (
+            <span style={{
+              background: "#10b981",
+              color: "#fff",
+              borderRadius: "12px",
+              padding: "2px 8px",
+              fontSize: "0.75rem",
+              fontWeight: "700"
+            }}>
+              {passengerItems.length}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setTab("approved")}
           style={{
             padding: "12px 20px",
             border: "none",
-            background: "transparent",
+            background: tab === "approved" ? "#faf5ff" : "transparent",
             color: tab === "approved" ? "#8b5cf6" : "#6b7280",
             fontSize: "1rem",
             fontWeight: tab === "approved" ? "700" : "500",
             cursor: "pointer",
             borderBottom: tab === "approved" ? "3px solid #8b5cf6" : "none",
             transition: "all 0.2s ease",
-            marginBottom: "-2px"
+            marginBottom: "-2px",
+            borderRadius: "8px 8px 0 0",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px"
+          }}
+          onMouseOver={(e) => {
+            if (tab !== "approved") {
+              e.currentTarget.style.background = "#f3f4f6";
+            }
+          }}
+          onMouseOut={(e) => {
+            if (tab !== "approved") {
+              e.currentTarget.style.background = "transparent";
+            }
           }}
         >
           ✅ Approved Passes
+          {(approvedStudents.length + approvedPassengers.length) > 0 && (
+            <span style={{
+              background: "#8b5cf6",
+              color: "#fff",
+              borderRadius: "12px",
+              padding: "2px 8px",
+              fontSize: "0.75rem",
+              fontWeight: "700"
+            }}>
+              {approvedStudents.length + approvedPassengers.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setTab("cardmgmt")}
+          style={{
+            padding: "12px 20px",
+            border: "none",
+            background: tab === "cardmgmt" ? "#fef2f2" : "transparent",
+            color: tab === "cardmgmt" ? "#ef4444" : "#6b7280",
+            fontSize: "1rem",
+            fontWeight: tab === "cardmgmt" ? "700" : "500",
+            cursor: "pointer",
+            borderBottom: tab === "cardmgmt" ? "3px solid #ef4444" : "none",
+            transition: "all 0.2s ease",
+            marginBottom: "-2px",
+            borderRadius: "8px 8px 0 0",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px"
+          }}
+          onMouseOver={(e) => {
+            if (tab !== "cardmgmt") {
+              e.currentTarget.style.background = "#f3f4f6";
+            }
+          }}
+          onMouseOut={(e) => {
+            if (tab !== "cardmgmt") {
+              e.currentTarget.style.background = "transparent";
+            }
+          }}
+        >
+          🔧 Card Management
         </button>
       </div>
+      
+      {/* Real-time Status Indicator */}
+      {tab === "approved" && (
+        <div style={{
+          background: "#f0fdf4",
+          border: "1px solid #86efac",
+          borderRadius: "8px",
+          padding: "8px 12px",
+          marginBottom: "16px",
+          fontSize: "0.85rem",
+          color: "#166534",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px"
+        }}>
+          <span style={{ fontSize: "1rem" }}>🔄</span>
+          <span>Pass status updates automatically every 30 seconds</span>
+          <span style={{ marginLeft: "auto", fontSize: "0.8rem", opacity: 0.8 }}>
+            Last updated: {lastUpdate.toLocaleTimeString()}
+          </span>
+        </div>
+      )}
 
       {error && (
         <div style={{
@@ -468,14 +827,248 @@ export default function AdminDashboard({ onLogout }: Props) {
         border: "1px solid rgba(0,0,0,0.05)",
         overflowX: "auto"
       }}>
-        {loading && (
+        {loading && tab !== "cardmgmt" && (
           <div style={{ textAlign: "center", padding: "60px 20px", color: "#6b7280" }}>
             <div style={{ fontSize: "3rem", marginBottom: "12px" }}>⏳</div>
             <div>Loading registrations...</div>
           </div>
         )}
 
-        {!loading && items.length === 0 && (
+        {/* Card Management Tab */}
+        {tab === "cardmgmt" && (
+          <div>
+            <h3 style={{ margin: "0 0 20px 0", fontSize: "1.1rem", color: "#0b1220" }}>
+              🔧 Card Management - Scan & Manage RFID Cards
+            </h3>
+
+            {/* Scan Section */}
+            <div style={{
+              padding: "40px",
+              textAlign: "center",
+              background: "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)",
+              borderRadius: "12px",
+              marginBottom: "24px"
+            }}>
+              <div style={{
+                width: "100px",
+                height: "100px",
+                margin: "0 auto 24px",
+                background: scanning ? "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)" : "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "3rem",
+                animation: scanning ? "pulse 1.5s infinite" : "none",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.2)"
+              }}>
+                {scanning ? "📡" : "💳"}
+              </div>
+
+              <button
+                onClick={scanCard}
+                disabled={scanning}
+                style={{
+                  padding: "16px 40px",
+                  fontSize: "1.1rem",
+                  fontWeight: "700",
+                  background: scanning 
+                    ? "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)" 
+                    : "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "10px",
+                  cursor: scanning ? "not-allowed" : "pointer",
+                  boxShadow: "0 6px 16px rgba(239,68,68,0.4)",
+                  transition: "all 0.3s ease",
+                  minWidth: "240px"
+                }}
+              >
+                {scanning ? "⏳ Scanning..." : "🎫 Scan Card"}
+              </button>
+
+              {scanning && (
+                <p style={{
+                  marginTop: "16px",
+                  color: "#ef4444",
+                  fontSize: "1rem",
+                  fontWeight: "600"
+                }}>
+                  📱 Place card near EM-18 reader...
+                </p>
+              )}
+            </div>
+
+            {/* Scanned Card Info */}
+            {scannedCard && (
+              <div style={{
+                padding: "32px",
+                background: scannedCard.valid ? "#ecfdf5" : "#fef2f2",
+                borderTop: `4px solid ${scannedCard.valid ? "#10b981" : "#ef4444"}`,
+                borderRadius: "12px",
+                marginBottom: "24px"
+              }}>
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "16px",
+                  marginBottom: "24px"
+                }}>
+                  <div style={{
+                    width: "60px",
+                    height: "60px",
+                    borderRadius: "50%",
+                    background: scannedCard.valid ? "#10b981" : "#ef4444",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "2rem"
+                  }}>
+                    {scannedCard.valid ? "✅" : "❌"}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{
+                      margin: "0 0 4px 0",
+                      fontSize: "1.5rem",
+                      color: scannedCard.valid ? "#065f46" : "#991b1b",
+                      fontWeight: "700"
+                    }}>
+                      {scannedCard.valid ? "Valid Pass Found" : "Invalid/No Pass"}
+                    </h3>
+                    <p style={{
+                      margin: 0,
+                      color: scannedCard.valid ? "#047857" : "#dc2626",
+                      fontSize: "0.95rem"
+                    }}>
+                      {scannedCard.message}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Pass Details - Show for both valid and expired passes */}
+                <div>
+                  {/* Photo */}
+                  {scannedCard.photoPath && (
+                    <div style={{ textAlign: "center", marginBottom: "24px" }}>
+                      <div style={{
+                        width: "120px",
+                        height: "120px",
+                        margin: "0 auto",
+                        borderRadius: "50%",
+                        overflow: "hidden",
+                        border: `3px solid ${scannedCard.valid ? "#10b981" : "#ef4444"}`,
+                        boxShadow: `0 6px 16px ${scannedCard.valid ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"}`
+                      }}>
+                        <img
+                          src={`http://localhost:4000/uploads/${scannedCard.photoPath}`}
+                          alt="Photo"
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover"
+                          }}
+                          onError={(e) => e.currentTarget.style.display = "none"}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pass Details */}
+                  {scannedCard.passengerName && (
+                    <div style={{
+                      background: "#fff",
+                      borderRadius: "10px",
+                      padding: "24px",
+                      marginBottom: "24px"
+                    }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                        <div>
+                          <div style={{ color: "#6b7280", fontSize: "0.85rem", marginBottom: "4px" }}>Name</div>
+                          <div style={{ fontSize: "1.1rem", fontWeight: "700", color: "#1f2937" }}>
+                            {scannedCard.passengerName}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ color: "#6b7280", fontSize: "0.85rem", marginBottom: "4px" }}>Pass Type</div>
+                          <div style={{ fontSize: "1.1rem", fontWeight: "700", color: "#1f2937" }}>
+                            {scannedCard.passType}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ color: "#6b7280", fontSize: "0.85rem", marginBottom: "4px" }}>Pass Number</div>
+                          <div style={{ fontSize: "1.1rem", fontWeight: "700", color: "#1f2937" }}>
+                            {scannedCard.passNumber}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ color: "#6b7280", fontSize: "0.85rem", marginBottom: "4px" }}>Card Number (UID)</div>
+                          <div style={{ 
+                            fontSize: "1rem", 
+                            fontWeight: "700", 
+                            color: "#1f2937",
+                            fontFamily: "monospace",
+                            letterSpacing: "0.5px"
+                          }}>
+                            {scannedCard.rfidUid || "N/A"}
+                          </div>
+                        </div>
+                        <div style={{ gridColumn: "1 / -1" }}>
+                          <div style={{ color: "#6b7280", fontSize: "0.85rem", marginBottom: "4px" }}>Valid Until</div>
+                          <div style={{ fontSize: "1.1rem", fontWeight: "700", color: "#1f2937" }}>
+                            {formatDate(scannedCard.validUntil)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action Buttons - Only show if pass has details */}
+                  {scannedCard.passengerName && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                        <button
+                          onClick={expireCard}
+                          disabled={expiring}
+                          style={{
+                            padding: "14px 20px",
+                            background: expiring ? "#fcd34d" : "#f59e0b",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "8px",
+                            cursor: expiring ? "not-allowed" : "pointer",
+                            fontWeight: "700",
+                            fontSize: "1rem",
+                            transition: "all 0.3s ease"
+                          }}
+                        >
+                          {expiring ? "⏳ Expiring..." : "⏰ Expire Pass"}
+                        </button>
+
+                        <button
+                          onClick={eraseCard}
+                          disabled={erasing}
+                          style={{
+                            padding: "14px 20px",
+                            background: erasing ? "#fca5a5" : "#ef4444",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "8px",
+                            cursor: erasing ? "not-allowed" : "pointer",
+                            fontWeight: "700",
+                            fontSize: "1rem",
+                            transition: "all 0.3s ease"
+                          }}
+                        >
+                          {erasing ? "⏳ Erasing..." : "🗑️ Erase Card"}
+                        </button>
+                      </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!loading && items.length === 0 && tab !== "cardmgmt" && (
           <div style={{ textAlign: "center", padding: "60px 20px", color: "#6b7280" }}>
             <div style={{ fontSize: "3rem", marginBottom: "12px" }}>✨</div>
             <div style={{ fontSize: "1.1rem", fontWeight: "500" }}>No pending approvals</div>
@@ -483,7 +1076,7 @@ export default function AdminDashboard({ onLogout }: Props) {
           </div>
         )}
 
-        {!loading && items.length > 0 && (
+        {!loading && items.length > 0 && tab !== "cardmgmt" && (
           <div>
             <h3 style={{ margin: "0 0 20px 0", fontSize: "1.1rem", color: "#0b1220" }}>
               {tab === "college" ? "📋 College Students Pending Approval" : tab === "passenger" ? "🎫 Passenger Pass Requests" : "📦 Approved Passes"}
@@ -504,11 +1097,21 @@ export default function AdminDashboard({ onLogout }: Props) {
                       {tab === "college" ? "Student ID" : tab === "passenger" ? "Email/Contact" : "Type"}
                     </th>
                     {(tab === "passenger" || tab === "approved") && <th style={{ padding: "14px", textAlign: "left", fontWeight: "600", color: "#0b1220" }}>Pass Type</th>}
+                    {tab === "approved" && <th style={{ padding: "14px", textAlign: "center", fontWeight: "600", color: "#0b1220" }}>Status</th>}
                     <th style={{ padding: "14px", textAlign: "center", fontWeight: "600", color: "#0b1220" }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((it, idx) => (
+                  {items.map((it, idx) => {
+                    // Calculate status for approved passes (real-time with lastUpdate trigger)
+                    const now = lastUpdate;
+                    const isExpired = tab === "approved" && (it as any).passValidity && new Date((it as any).passValidity) < now;
+                    const isDeleted = tab === "approved" && !(it as any).rfidUid;
+                    const statusText = isDeleted ? "Deleted" : isExpired ? "Expired" : "Active";
+                    const statusColor = isDeleted ? "#ef4444" : isExpired ? "#f59e0b" : "#10b981";
+                    const statusBg = isDeleted ? "#fef2f2" : isExpired ? "#fffbeb" : "#f0fdf4";
+                    
+                    return (
                     <tr key={it.id} style={{
                       borderBottom: "1px solid #e5e7eb",
                       background: idx % 2 === 0 ? "#ffffff" : "#f9fafb",
@@ -529,9 +1132,50 @@ export default function AdminDashboard({ onLogout }: Props) {
                           {tab === "approved" ? (it as any).type === "student" ? "STUDENT" : (it.passType || "monthly").toUpperCase() : (it.passType || "monthly").toUpperCase()}
                         </td>
                       )}
+                      {tab === "approved" && (
+                        <td style={{ padding: "14px", textAlign: "center" }}>
+                          <span style={{
+                            display: "inline-block",
+                            padding: "6px 12px",
+                            borderRadius: "6px",
+                            fontSize: "0.85rem",
+                            fontWeight: "600",
+                            background: statusBg,
+                            color: statusColor,
+                            border: `1px solid ${statusColor}30`
+                          }}>
+                            {isDeleted ? "🗑️" : isExpired ? "⏰" : "✅"} {statusText}
+                          </span>
+                        </td>
+                      )}
                       <td style={{ padding: "14px", textAlign: "center" }}>
                         {tab === "college" ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
+                            <button
+                              onClick={() => setSelectedPassenger(it)}
+                              style={{
+                                padding: "8px 16px",
+                                background: "#3b82f6",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "6px",
+                                cursor: "pointer",
+                                fontSize: "0.9rem",
+                                fontWeight: "600",
+                                transition: "all 0.3s ease",
+                                marginBottom: "4px"
+                              }}
+                              onMouseOver={(e) => {
+                                e.currentTarget.style.transform = "translateY(-2px)";
+                                e.currentTarget.style.boxShadow = "0 4px 12px rgba(59,130,246,0.3)";
+                              }}
+                              onMouseOut={(e) => {
+                                e.currentTarget.style.transform = "none";
+                                e.currentTarget.style.boxShadow = "none";
+                              }}
+                            >
+                              👁️ View Details
+                            </button>
                             <button
                               onClick={() => approve(it.id)}
                               disabled={approving === it.id}
@@ -714,7 +1358,8 @@ export default function AdminDashboard({ onLogout }: Props) {
                         )}
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -780,7 +1425,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                   {/* Personal Information */}
                   <div style={{ marginBottom: "24px" }}>
                     <h3 style={{ margin: "0 0 16px 0", fontSize: "1.1rem", color: "#0b1220", fontWeight: "600" }}>
-                      📋 Personal Information
+                      📋 {(selectedPassenger as any).studentName ? "Student" : "Personal"} Information
                     </h3>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                       <div>
@@ -788,49 +1433,78 @@ export default function AdminDashboard({ onLogout }: Props) {
                           Full Name
                         </label>
                         <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
-                          {selectedPassenger.passengerName}
+                          {(selectedPassenger as any).studentName || selectedPassenger.passengerName}
                         </div>
                       </div>
-                      <div>
-                        <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
-                          Age
-                        </label>
-                        <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
-                          {selectedPassenger.age} years
+                      {(selectedPassenger as any).studentId && (
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                            Student ID
+                          </label>
+                          <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
+                            {(selectedPassenger as any).studentId}
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
-                          Phone Number
-                        </label>
-                        <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
-                          {selectedPassenger.phoneNumber}
+                      )}
+                      {(selectedPassenger as any).course && (
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                            Course
+                          </label>
+                          <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
+                            {(selectedPassenger as any).course}
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
-                          Email
-                        </label>
-                        <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
-                          {selectedPassenger.email}
+                      )}
+                      {selectedPassenger.age && (
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                            Age
+                          </label>
+                          <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
+                            {selectedPassenger.age} years
+                          </div>
                         </div>
-                      </div>
+                      )}
+                      {selectedPassenger.phoneNumber && (
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                            Phone Number
+                          </label>
+                          <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
+                            {selectedPassenger.phoneNumber}
+                          </div>
+                        </div>
+                      )}
+                      {selectedPassenger.email && (
+                        <div>
+                          <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                            Email
+                          </label>
+                          <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500" }}>
+                            {selectedPassenger.email}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Address */}
-                  <div style={{ marginBottom: "24px" }}>
-                    <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
-                      Address
-                    </label>
-                    <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500", whiteSpace: "pre-wrap" }}>
-                      {selectedPassenger.address}
+                  {/* Address - only for passengers */}
+                  {selectedPassenger.address && (
+                    <div style={{ marginBottom: "24px" }}>
+                      <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                        Address
+                      </label>
+                      <div style={{ fontSize: "0.95rem", color: "#0b1220", fontWeight: "500", whiteSpace: "pre-wrap" }}>
+                        {selectedPassenger.address}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  {/* Government ID */}
-                  <div style={{ marginBottom: "24px", padding: "16px", background: "#f0fdf4", borderRadius: "8px", borderLeft: "4px solid #10b981" }}>
-                    <h3 style={{ margin: "0 0 12px 0", fontSize: "0.95rem", color: "#0b1220", fontWeight: "600" }}>
+                  {/* Government ID - only for passengers */}
+                  {(selectedPassenger as any).idType && (
+                    <div style={{ marginBottom: "24px", padding: "16px", background: "#f0fdf4", borderRadius: "8px", borderLeft: "4px solid #10b981" }}>
+                      <h3 style={{ margin: "0 0 12px 0", fontSize: "0.95rem", color: "#0b1220", fontWeight: "600" }}>
                       🆔 Government ID
                     </h3>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
@@ -852,14 +1526,75 @@ export default function AdminDashboard({ onLogout }: Props) {
                       </div>
                     </div>
                   </div>
+                  )}
 
-                  {/* Pass Type */}
-                  <div style={{ marginBottom: "24px", padding: "16px", background: "#eff6ff", borderRadius: "8px", borderLeft: "4px solid #3b82f6" }}>
-                    <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
-                      🎫 Requested Pass Type
-                    </label>
-                    <div style={{ fontSize: "1rem", color: "#0b1220", fontWeight: "600" }}>
-                      {selectedPassenger.passType?.toUpperCase() || "MONTHLY"}
+                  {/* Pass Type - only for passengers */}
+                  {selectedPassenger.passType && (
+                    <div style={{ marginBottom: "24px", padding: "16px", background: "#eff6ff", borderRadius: "8px", borderLeft: "4px solid #3b82f6" }}>
+                      <label style={{ display: "block", fontSize: "0.85rem", color: "#6b7280", marginBottom: "4px", fontWeight: "500" }}>
+                        🎫 Requested Pass Type
+                      </label>
+                      <div style={{ fontSize: "1rem", color: "#0b1220", fontWeight: "600" }}>
+                        {selectedPassenger.passType?.toUpperCase() || "MONTHLY"}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Document Verification Section */}
+                  <div style={{ marginBottom: "24px", padding: "16px", background: "#fef3c7", borderRadius: "8px", borderLeft: "4px solid #f59e0b" }}>
+                    <h3 style={{ margin: "0 0 12px 0", fontSize: "0.95rem", color: "#92400e", fontWeight: "600" }}>
+                      📄 Documents & Photo Verification
+                    </h3>
+                    
+                    {/* Documents */}
+                    {selectedPassenger.documents && (
+                      <div style={{ marginBottom: "12px" }}>
+                        <label style={{ display: "block", fontSize: "0.85rem", color: "#92400e", marginBottom: "8px", fontWeight: "500" }}>
+                          📎 Uploaded Documents
+                        </label>
+                        <div style={{ background: "#fff", padding: "12px", borderRadius: "6px", fontSize: "0.9rem" }}>
+                          {(() => {
+                            try {
+                              const docs = JSON.parse(selectedPassenger.documents);
+                              return docs.length > 0 ? (
+                                <ul style={{ margin: "0", paddingLeft: "20px" }}>
+                                  {docs.map((doc: string, idx: number) => (
+                                    <li key={idx} style={{ color: "#1f2937", marginBottom: "4px" }}>
+                                      <a href={`http://localhost:4000/uploads/${doc}`} target="_blank" rel="noopener noreferrer" style={{ color: "#3b82f6", textDecoration: "none" }}>
+                                        📄 View Document {idx + 1}
+                                      </a>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <div style={{ color: "#6b7280" }}>No documents uploaded</div>
+                              );
+                            } catch {
+                              return <div style={{ color: "#6b7280" }}>No documents available</div>;
+                            }
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Photo */}
+                    <div>
+                      <label style={{ display: "block", fontSize: "0.85rem", color: "#92400e", marginBottom: "8px", fontWeight: "500" }}>
+                        📸 Verification Photo
+                      </label>
+                      <div style={{ background: "#fff", padding: "12px", borderRadius: "6px", textAlign: "center" }}>
+                        {(selectedPassenger as any).photoPath ? (
+                          <div>
+                            <img 
+                              src={`http://localhost:4000/uploads/${(selectedPassenger as any).photoPath}`} 
+                              alt="Passenger photo" 
+                              style={{ maxWidth: "100%", maxHeight: "200px", borderRadius: "8px" }}
+                            />
+                          </div>
+                        ) : (
+                          <div style={{ color: "#6b7280" }}>No photo uploaded</div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1409,7 +2144,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                   Type: {duplicateCard.type === 'student' ? 'Student Monthly' : (duplicateCard.type || 'Monthly')}
                 </p>
                 <p style={{ margin: "0 0 4px 0", fontSize: "0.9rem" }}>
-                  Expires: {duplicateCard.expiryDate.toLocaleDateString()}
+                  Expires: {formatDate(duplicateCard.expiryDate.toISOString())}
                 </p>
                 <p style={{ margin: "0", fontSize: "0.85rem", opacity: 0.8 }}>
                   Status: <strong>ACTIVE</strong>
@@ -1543,6 +2278,13 @@ export default function AdminDashboard({ onLogout }: Props) {
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.1); }
+        }
+      `}</style>
     </div>
   );
 }
